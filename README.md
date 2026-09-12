@@ -42,11 +42,16 @@ manually entered copies of the same payment may still need review.
 Requires **Android 8.0 (API 26) or newer**. Current runtime verification is on a Pixel 9a Android 16 emulator; physical-device and OEM testing is still pending.
 
 1. Open [Releases](https://github.com/hk121902-stack/finance-ministry/releases) and choose the newest **pre-release**. Download its `finance-ministry-*-debug.apk`, not the source-code ZIP.
-2. Install the APK on a test device. Android may ask you to allow installations from the app you used to download it.
+2. Install the APK on a test device. Android may ask you to allow installations from the browser or Files app you used to download it. This is a one-time installer permission for that app; download only from this repository's Releases page. Do not disable Play Protect globally.
 3. Open Finance Ministry. **+ Add transaction** works immediately without SMS or notification permissions.
 4. Open **Settings → Enable SMS capture**, read the disclosure, and continue through Android's SMS permission prompt. **Pause SMS capture** means capture is currently enabled.
 5. In **Settings**, enable **Recording notifications** and allow the separate Android prompt. If blocked, use **Allow Android notifications** or **Open notification settings**. The in-app switch and Android permission are independent; both must be on for notifications.
 6. New eligible messages are recorded automatically. Open a row or its notification to review or correct it.
+
+Android treats APK installation, SMS access and notification access as separate choices.
+SMS capture and notifications are optional: declining either one never blocks manual
+transactions. The app explains why it needs SMS access before Android shows its
+permission prompt.
 
 Manual example: enter `250.50`, keep **Money out**, and save. Cash, Other and Successful are the defaults; transaction type and payment status are under **More details**. The ledger shows **Confirmed by you**.
 
