@@ -26,6 +26,17 @@ class NotificationNavigationUiTest {
             rule.waitUntil(15000) { manager.activeNotifications.map { it.tag }.containsAll(listOf(first, second)) }
             val edit = manager.activeNotifications.single { it.tag == first }.notification.actions.single { it.title.toString() == "Edit" }.actionIntent
             val view = manager.activeNotifications.single { it.tag == second }.notification.contentIntent
+            val classify = manager.activeNotifications.single { it.tag == first }.notification.actions.single { it.title.toString() == "Categorize" }.actionIntent
+            classify.send()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Categorize transaction").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Amount (INR)").assertDoesNotExist()
+            rule.onNodeWithText("Category: Other").performClick()
+            rule.onNodeWithText("Food").performClick()
+            rule.onNodeWithText("For someone else").performClick()
+            rule.onNodeWithText("Save transaction").performClick()
+            rule.waitUntil(15000) { runBlocking { repository.get(first)?.category == "Food" } }
+            org.junit.Assert.assertEquals("ForOther", runBlocking { repository.get(first)!!.ownership })
+            org.junit.Assert.assertEquals(70001L, runBlocking { repository.get(first)!!.amountMinor })
             edit.send()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Edit / confirm transaction").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("700.01").assertExists()

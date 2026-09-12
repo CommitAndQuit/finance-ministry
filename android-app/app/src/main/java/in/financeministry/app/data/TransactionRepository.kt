@@ -328,6 +328,37 @@ class TransactionRepository(private val context: Context, private val namespace:
         row.id
     }
 
+    /** Labels never confirm a payment or change its parsed financial fields. */
+    suspend fun classify(id: String, category: String, ownership: SpendingOwnership,
+        group: String = "", share: String = "", repaid: String = "") = locked {
+        val dao = db().transactions()
+        val old = requireNotNull(dao.get(id)) { "This transaction no longer exists." }
+        val amount = requireNotNull(old.amountMinor) { "Review the amount first using Edit all details." }
+        val input = ManualInput(java.math.BigDecimal.valueOf(amount, 2).toPlainString(), Direction.Debit,
+            old.effectiveTimestamp, TransactionType.Other, category = category, ownership = ownership,
+            groupLabel = group, personalShare = share, repaid = repaid)
+        input.validate()
+        val now = System.currentTimeMillis()
+        val type = if (ownership == SpendingOwnership.SelfTransfer) "SelfTransfer"
+            else if (old.transactionType == "SelfTransfer") "Other" else old.transactionType
+        val row = old.copy(category = category.trim(), ownership = ownership.name,
+            groupLabel = group.trim().takeIf { ownership == SpendingOwnership.Group },
+            personalShareMinor = input.personalShareMinor(), repaidMinor = input.repaidMinor(),
+            transactionType = type, linkedOriginalId = old.linkedOriginalId.takeIf { type == old.transactionType },
+            isUserCorrected = true, updatedAt = now)
+        fun fields(r: TransactionEntity) = mapOf("category" to r.category, "ownership" to r.ownership,
+            "groupLabel" to r.groupLabel, "personalShareMinor" to r.personalShareMinor?.toString(),
+            "repaidMinor" to r.repaidMinor.toString(), "transactionType" to r.transactionType)
+        db().runInTransaction {
+            if (type != old.transactionType) dao.unlinkFrom(id)
+            dao.update(row)
+            val before = fields(old)
+            dao.audit(fields(row).filter { (key, value) -> before[key] != value }.map { (key, value) ->
+                CorrectionEntity(UUID.randomUUID().toString(), id, now, key, before[key], value) })
+        }
+        revision.value++
+    }
+
     suspend fun delete(id: String) = locked {
         db().runInTransaction { db().transactions().unlinkFrom(id); db().transactions().delete(id) }
         context.getSystemService(NotificationManager::class.java).cancel(id, 1)

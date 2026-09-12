@@ -23,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     private val request = mutableStateOf<Pair<String, Boolean>?>(null)
+    private val quickRequest = mutableStateOf(false)
     private val reviewRequestGeneration = androidx.compose.runtime.mutableIntStateOf(0)
     private val resumeGeneration = androidx.compose.runtime.mutableIntStateOf(0)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,9 +33,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             FinanceMinistryTheme {
                 LedgerApp((application as FinanceMinistryApp).container.repository, request.value, resumeGeneration.intValue,
-                    reviewRequestGeneration.intValue) {
+                    reviewRequestGeneration.intValue, quickRequest = quickRequest.value) {
                     request.value = null
-                    intent.removeExtra("transaction_id"); intent.removeExtra("edit")
+                    intent.removeExtra("transaction_id"); intent.removeExtra("edit"); intent.removeExtra("quick_classify")
                 }
             }
         }
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); readRequest(intent) }
     fun requestReview() { reviewRequestGeneration.intValue++ }
     private fun readRequest(intent: Intent) {
+        quickRequest.value = intent.getBooleanExtra("quick_classify", false)
         request.value = intent.getStringExtra("transaction_id")?.let { it to intent.getBooleanExtra("edit", false) }
         if (intent.getBooleanExtra("open_review", false)) {
             requestReview()

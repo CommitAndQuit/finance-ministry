@@ -48,13 +48,14 @@ fun transactionTime(millis: Long): String = DateTimeFormatter.ofPattern("dd MMM 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?, refreshGeneration: Int = 0,
-    reviewRequestGeneration: Int = 0, consumeRequest: () -> Unit) {
+    reviewRequestGeneration: Int = 0, quickRequest: Boolean = false, consumeRequest: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val revision by repository.revision.collectAsState()
     var snapshot by remember { mutableStateOf<LedgerSnapshot?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var form by rememberSaveable { mutableStateOf(false) }
+    var quickForm by rememberSaveable { mutableStateOf(false) }
     var dirtyForm by rememberSaveable { mutableStateOf(false) }
     var requestWarning by remember { mutableStateOf(false) }
     var requestApproval by remember { mutableIntStateOf(0) }
@@ -139,6 +140,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             if (form && dirtyForm && approvedRequest != request) { requestWarning = true; return@LaunchedEffect }
             approvedRequest = null
             dirtyForm = false
+            quickForm = quickRequest
             selected = null; selectedId = null; form = false; settings = false
             try { selected = repository.get(request.first); if (selected == null) error = "This transaction no longer exists." else { selectedId = selected!!.id; form = request.second; error = null } }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
@@ -160,7 +162,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (selectedId != null && selected == null) { Text("Loading transaction…") }
             else if (form) {
-                TransactionForm(repository, selected, onDone = { dirtyForm = false; form = false; selected = null; selectedId = null; offset = 0; error = null }, onDirtyChange = { dirtyForm = it })
+                TransactionForm(repository, selected, onDone = { dirtyForm = false; quickForm = false; form = false; selected = null; selectedId = null; offset = 0; error = null }, onDirtyChange = { dirtyForm = it }, quickOnly = quickForm)
             } else if (selected != null) {
                 val row = selected!!
                 Text(money(row.amountMinor), style = MaterialTheme.typography.headlineSmall)
@@ -256,19 +258,26 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                                 TextButton(onClick = { selectedMonth = java.time.YearMonth.parse(selectedMonth).plusMonths(1).toString(); offset = 0; snapshot = null },
                                     modifier = Modifier.semantics { contentDescription = "Next month" }) { Text("›") }
                             }
-                            Text("Your spending", style = MaterialTheme.typography.labelMedium)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Text("Your spending", style = MaterialTheme.typography.labelMedium)
+                                IconButton(onClick = { showSummaryDetails = true }, modifier = Modifier.semantics { contentDescription = "How totals work" }) { Text("ⓘ") }
+                            }
                             Text(money(it.personalSpend), style = MaterialTheme.typography.headlineMedium)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Column(Modifier.weight(1f)) { Text("Money out · month", style = MaterialTheme.typography.labelSmall); Text(money(it.debit), style = MaterialTheme.typography.titleSmall) }
+                                Column(Modifier.weight(1f)) { Text("Money in · month", style = MaterialTheme.typography.labelSmall); Text(money(it.credit), style = MaterialTheme.typography.titleSmall) }
+                            }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Column(Modifier.weight(1f)) { Text("Paid for others · month", style = MaterialTheme.typography.labelSmall); Text(money(it.paidForOthers), style = MaterialTheme.typography.titleSmall) }
                                 Column(Modifier.weight(1f)) { Text("Still owed · all dates", style = MaterialTheme.typography.labelSmall); Text(money(it.outstandingRepayments), style = MaterialTheme.typography.titleSmall) }
                             }
                             if (java.time.YearMonth.parse(selectedMonth) == java.time.YearMonth.now())
                                 Text("Today: ${money(it.dailyDebit)} out · ${money(it.dailyCredit)} in", style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { showSummaryDetails = !showSummaryDetails }) { Text(if (showSummaryDetails) "Hide details" else "How totals work") }
                             if (showSummaryDetails) {
-                                HorizontalDivider()
-                                Text("Eligible payments: ${money(it.debit)} out · ${money(it.credit)} in", style = MaterialTheme.typography.bodySmall)
-                                Text("Spending excludes transfers, card repayments, failed or unconfirmed payments, and amounts others owe you.", style = MaterialTheme.typography.bodySmall)
+                                AlertDialog(onDismissRequest = { showSummaryDetails = false }, title = { Text("How totals work") },
+                                    text = { Text("Money in and out cover the selected month. They exclude self transfers, card repayments, failed or unconfirmed payments, and reversed originals.\n\nYour spending counts your share of money out. Paid for others is the remaining share. Still owed includes unpaid amounts across all dates.\n\nToday shows eligible payments for today.") },
+                                    confirmButton = { TextButton(onClick = { showSummaryDetails = false }) { Text("Got it") } })
                             }
                         } }
                     }

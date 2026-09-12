@@ -21,8 +21,10 @@ import java.time.ZoneId
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TransactionForm(repository: TransactionRepository, existing: TransactionEntity?, onDone: () -> Unit, onDirtyChange: (Boolean) -> Unit = {}) {
+fun TransactionForm(repository: TransactionRepository, existing: TransactionEntity?, onDone: () -> Unit, onDirtyChange: (Boolean) -> Unit = {}, quickOnly: Boolean = false) {
+    var compact by rememberSaveable(existing?.id, quickOnly) { mutableStateOf(quickOnly && existing != null) }
     val formatter = remember { DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm").withResolverStyle(java.time.format.ResolverStyle.STRICT) }
     val draftId = rememberSaveable(existing?.id) { java.util.UUID.randomUUID().toString() }
     var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.amountMinor?.let { BigDecimal.valueOf(it, 2).toPlainString() } ?: "") }
@@ -59,7 +61,12 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     BackHandler { leave() }
     Column(Modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (existing == null) "Add transaction" else "Edit / confirm transaction", style = MaterialTheme.typography.titleLarge)
+        Text(if (compact) "Categorize transaction" else if (existing == null) "Add transaction" else "Edit / confirm transaction", style = MaterialTheme.typography.titleLarge)
+        if (compact && existing != null) {
+            Text("${`in`.financeministry.app.money(existing.amountMinor)} · ${existing.counterpartyLabel ?: friendly(existing.direction)}", style = MaterialTheme.typography.titleMedium)
+            if (existing.reviewState == "NeedsReview") Text("Still needs review. Saving labels will not confirm the payment.", style = MaterialTheme.typography.bodySmall)
+        }
+        if (!compact) {
         Text(if (existing?.reviewState == "NeedsReview") "Check the details below. Unconfirmed transactions are excluded from totals." else "${friendly(existing?.sourceType ?: "Manual")} · Stored only on this device", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(amount, { amount = it }, label = { Text("Amount (INR)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
         if (existing != null && amount.isBlank()) Text("Enter the transaction amount; it could not be identified.", color = MaterialTheme.colorScheme.error)
@@ -70,9 +77,10 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         }
         if (direction == "Unknown") Text("Choose money out, money in, or transfer.", color = MaterialTheme.colorScheme.error)
         OutlinedTextField(label, { label = it.take(60) }, label = { Text("Label (optional)") }, supportingText = { Text("A short description, not personal or account details.") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
         Choice("Category", category, listOf("Other", "Food", "Travel", "Shopping", "Bills", "Health", "Education", "Entertainment", "Cash")) { category = it }
         Text("Who was this payment for?", style = MaterialTheme.typography.labelLarge)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("Personal", "ForOther", "Group", "SelfTransfer").forEach { option ->
                 FilterChip(selected = ownership == option, onClick = {
                     ownership = option
@@ -89,6 +97,8 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         if (ownership == "ForOther" || ownership == "Group") {
             OutlinedTextField(repaid, { repaid = it }, label = { Text("Already repaid (INR, optional)") }, supportingText = { Text("Update this when people repay you.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
         }
+        if (compact) TextButton(onClick = { compact = false }) { Text("Edit all details") }
+        if (!compact) {
         val selectedDate = LocalDateTime.parse(date, formatter)
         TextButton(onClick = {
             android.app.DatePickerDialog(context, pickerTheme, { _, year, month, day ->
@@ -119,12 +129,25 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
             OutlinedTextField(notes, { notes = it.take(200) }, label = { Text("Notes (optional)") }, modifier = Modifier.fillMaxWidth())
             Text("Use short labels and notes. Do not paste SMS, OTPs, personal contact names, UPI IDs or full account numbers. Text stays encrypted on this device.", style = MaterialTheme.typography.bodySmall)
         }
+        }
       }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
                 if (!busy) {
+                    if (compact && existing != null) {
+                        busy = true
+                        scope.launch {
+                            try {
+                                repository.classify(existing.id, category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid)
+                                onDone()
+                            } catch (e: IllegalArgumentException) { error = e.message ?: "Check the fields." }
+                            catch (_: Exception) { error = "Could not save. Check that the record still exists and retry." }
+                            finally { busy = false }
+                        }
+                        return@Button
+                    }
                     val input = try {
                         val editedTimestamp = LocalDateTime.parse(date, formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                         val timestamp = if (existing != null && date == initialDate) existing.effectiveTimestamp else editedTimestamp

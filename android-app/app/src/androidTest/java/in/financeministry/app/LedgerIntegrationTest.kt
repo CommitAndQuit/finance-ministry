@@ -25,6 +25,32 @@ class LedgerIntegrationTest {
     private fun namespace() = "test_${UUID.randomUUID().toString().replace("-", "") }"
     private fun input() = ManualInput("250.50", Direction.Debit, System.currentTimeMillis(), TransactionType.Other)
 
+    @Test fun quick_classification_preserves_review_and_financial_fields_and_validates_group_share() = runBlocking {
+        val name = namespace(); val repository = TransactionRepository(context, name)
+        val now = System.currentTimeMillis()
+        try {
+            val original = TransactionEntity(id = "quick", sourceType = "SMS", sourceTimestamp = now,
+                effectiveTimestamp = now, amountMinor = 25050, direction = "Debit", status = "Successful",
+                channel = "Unknown", transactionType = "Unknown", reviewState = "NeedsReview", createdAt = now, updatedAt = now)
+            val db = FinanceDatabase.open(context, DeviceSecrets(context, name).databasePassphrase(false), "$name.db")
+            try { db.transactions().insert(original) } finally { db.close() }
+            repository.classify("quick", "Food", SpendingOwnership.Group, "Dinner", "50.50")
+            val saved = repository.get("quick")!!
+            assertEquals("NeedsReview", saved.reviewState)
+            assertEquals("Unknown", saved.transactionType)
+            assertEquals(original.effectiveTimestamp, saved.effectiveTimestamp)
+            assertEquals(original.amountMinor, saved.amountMinor)
+            assertEquals("Unknown", saved.channel)
+            assertEquals(5050L, saved.personalShareMinor)
+            assertEquals("0", repository.snapshot().debit.toString())
+            try {
+                repository.classify("quick", "Food", SpendingOwnership.Group, "Dinner", "300.00")
+                fail("An oversized share must be rejected")
+            } catch (_: IllegalArgumentException) { }
+            assertEquals(saved, repository.get("quick"))
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
     @Test fun encrypted_roundtrip_wrong_key_and_missing_key_preserve_data() = runBlocking {
         val name = namespace(); val secrets = DeviceSecrets(context, name); val file = context.getDatabasePath("$name.db")
         val repository = TransactionRepository(context, name)

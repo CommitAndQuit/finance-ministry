@@ -26,9 +26,9 @@ object TransactionNotifications {
             description = "Confirms saved transactions and opens corrections"; lockscreenVisibility = Notification.VISIBILITY_PRIVATE
         })
         if (!manager.areNotificationsEnabled() || manager.getNotificationChannel(CHANNEL).importance == NotificationManager.IMPORTANCE_NONE) return
-        fun action(edit: Boolean): PendingIntent {
-            val intent = Intent(context, MainActivity::class.java).setData(Uri.parse("finance://transaction/${row.id}?edit=$edit"))
-                .putExtra("transaction_id", row.id).putExtra("edit", edit)
+        fun action(edit: Boolean, quick: Boolean = false): PendingIntent {
+            val intent = Intent(context, MainActivity::class.java).setData(Uri.parse("finance://transaction/${row.id}?edit=$edit&quick=$quick"))
+                .putExtra("transaction_id", row.id).putExtra("edit", edit).putExtra("quick_classify", quick)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         }
@@ -40,6 +40,7 @@ object TransactionNotifications {
             .setVisibility(Notification.VISIBILITY_PRIVATE).setAutoCancel(true).setContentIntent(view)
             .setPublicVersion(Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification).setContentTitle("Finance Ministry transaction").build())
             .addAction(Notification.Action.Builder(null, "View", view).build())
+            .addAction(Notification.Action.Builder(null, "Categorize", action(true, true)).build())
             .addAction(Notification.Action.Builder(null, "Edit", action(true)).build()).build()
         manager.notify(row.id, 1, notification)
     }

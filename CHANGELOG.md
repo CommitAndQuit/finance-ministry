@@ -4,6 +4,14 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.9
+
+- Show selected-month money in and money out on the dashboard; open the totals
+  explanation from an accessible info button.
+- Add a notification Categorize shortcut with category, payment purpose, and group
+  share fields together. Label changes preserve financial details and review status.
+- Wrap payment-purpose choices so every option is discoverable on narrow screens.
+
 ## 0.1.0-alpha.8
 
 - Complete a review-response release hardening pass before packaging:

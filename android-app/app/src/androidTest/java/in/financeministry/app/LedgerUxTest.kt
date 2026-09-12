@@ -12,6 +12,17 @@ import org.junit.Assert.assertTrue
 class LedgerUxTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
 
+    @Test fun monthly_cash_flow_is_visible_and_totals_help_opens_from_info_icon() {
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out · month").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Money out · month").assertIsDisplayed()
+        rule.onNodeWithText("Money in · month").assertIsDisplayed()
+        rule.onNodeWithText("How totals work").assertDoesNotExist()
+        rule.onNodeWithContentDescription("How totals work").performClick()
+        rule.onNodeWithText("How totals work").assertIsDisplayed()
+        rule.onNodeWithText("Got it").performClick()
+        rule.onNodeWithText("How totals work").assertDoesNotExist()
+    }
+
     @Test fun settings_are_separate_and_return_to_home() {
         rule.onNodeWithText("Erase all local data").assertDoesNotExist()
         rule.onNodeWithText("Settings").performClick()
@@ -38,8 +49,9 @@ class LedgerUxTest {
             }
             rule.onNodeWithText("Added manually").performClick()
             rule.onNodeWithText("Apply").performClick()
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("₹71.23"))
-            rule.onNodeWithText("₹71.23").assertIsDisplayed()
+            val transactionRow = hasText("₹71.23") and hasClickAction()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(transactionRow)
+            rule.onNode(transactionRow).assertIsDisplayed()
         } finally { runBlocking { repository.delete(id) } }
     }
 
