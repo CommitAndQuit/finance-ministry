@@ -25,7 +25,7 @@ internal object ParserRules {
     val reversed = Regex("\\b(?:reversed|reversal)\\b")
     val pending = Regex("\\b(?:pending|awaiting|processing)\\b")
     val balanceOrLimit = Regex("\\b(?:(?:available|avail\\.?|avl)\\s*bal(?:ance)?|balance|credit limit|limit)\\b")
-    val balanceAmountPrefix = Regex("\\b(?:(?:available|avail\\.?|avl)\\s*bal(?:ance)?|balance|credit limit|limit)\\b(?:\\s+is)?[\\s.:=-]*$")
+    val balanceAmountPrefix = Regex("""\b(?:(?:(?:available|avail\.?|avl|avbl|aval|new|current)\s*)?(?:bal(?:ance)?|(?:credit\s+)?limit|lmt)|(?:current\s+)?outstanding(?:\s+balance)?|total\s+spends\s+this\s+cycle)\b(?:\s+is)?[\s.:=-]*$""")
     val sentPayment = Regex("""^sent\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\nfrom [^\r\n]{1,60}\b(?:a/c|account)\s+[*x•]+\d{4}\s*\r?\nto [^\r\n]{1,60}(?:\r?\n|$)""")
     private const val cardAmount = """(?:rs\.?|inr|₹)\s*[\d,.]+"""
     val cardSpend = Regex("""^(?:spent\s+$cardAmount|$cardAmount\s+spent)\s+on\s+[^\r\n]{1,60}?\bcard\s+[*xX•]*(?<last4>\d{4})(?!\d)\s+at\s+(?<merchant>[^\r\n]{1,80}?)\s+on\s+\d{4}-\d{2}-\d{2}(?::\d{2}:\d{2}:\d{2})?(?!\d)""", RegexOption.IGNORE_CASE)

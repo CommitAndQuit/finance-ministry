@@ -48,6 +48,29 @@ This does not establish physical-device reliability or independent parser accura
 
 ### Confirmed open parser issues
 
+#### Public-format research (September 2026, released in alpha.6)
+
+Research sources are format evidence, not an exhaustive or bank-certified catalog:
+
+- [Cashiro public bank tests](https://github.com/ritesh-kanwar/Cashiro/tree/bdf7ab6a5cd48fab8edce478544601a7555bfa0c/parser-core/src/test/kotlin/com/ritesh/parser/core/bank): inspected SBI, Kotak, PNB, YES, IDFC FIRST, Federal, IndusInd, Bank of India, Indian Bank, Axis and general Indian-bank examples. Useful variations include balance abbreviations, card prefixes and date/merchant ordering.
+- [EveryPaisa sample formats](https://github.com/ikppramesh/EveryPaisa/blob/main/TEST_TRANSACTIONS.md): inspected its Indian-bank section for charged-card and cycle-summary layouts. Repository examples may be synthetic; provenance of actual bank delivery is not independently established.
+- [Transaction SMS Parser](https://github.com/MabudAlam/transaction_sms_parser): surveyed the advertised bank inventory; claimed bank counts are not accepted as coverage evidence for this app.
+- Kotak and BOBCARD user reports supplied additional layout evidence. Public tests use invented amounts, dates, merchants and account hints; original reports and third-party implementation code are not copied into the repository.
+
+The researched regression suite distinguishes auto-recorded formats, reviewable
+mixed/foreign-currency alerts, and rejected non-transactions. It covers selected
+layouts for Kotak, BOBCARD, SBI, Federal, IDFC FIRST, YES, ICICI, HDFC, Axis, PNB,
+IndusInd, Indian Bank, NSDL, Punjab & Sind Bank and Kerala Bank, with Bank of India
+mixed-account clauses kept in review. This does not claim complete support for any
+bank. Canara, Union, RBL, HSBC, Standard Chartered, small-finance/cooperative banks,
+regional languages and currency-less alerts still need verified format fixtures.
+
+Future template additions must include source provenance, an independently expected
+amount/direction, summary-amount distractors and non-transaction variants. Existing
+regressions run together before accepting a change. Unknown card-spend layouts with
+clear movement evidence should remain reviewable; do not infer a payment merely
+from a bank name, a currency amount or the word "credit" in "credit card".
+
 - **Corpus coverage and false review noise — parser-v5 fixes in alpha.5.**
   Added supported BOB, Axis, HDFC, ICICI and Pluxee formats plus refund/receipt
   handling. Product names alone no longer establish debit/credit movements.

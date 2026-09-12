@@ -14,7 +14,7 @@ class RuleBasedFinancialSmsParser {
         val result = parseFields(input)
         if (result.decision == ParseDecision.Reject) return result
         val transactionText = ParserRules.transactionText(input.body)
-        val card = ParserRules.cardSpend.find(transactionText)
+        val card = ParserRules.cardSpend.find(transactionText) ?: CardAlertFormats.match(transactionText)
         val hints = (Regex("""\b(?:a/c|accounts?|cards?)\s+[*xX•]+(\d{4})(?!\d)""", RegexOption.IGNORE_CASE)
             .findAll(transactionText).map { "••••${it.groupValues[1]}" }.toList() +
             listOfNotNull(card?.groups?.get("last4")?.value?.let { "••••$it" })).distinct()
@@ -27,7 +27,7 @@ class RuleBasedFinancialSmsParser {
     private fun parseFields(input: IncomingSms): ParseAssessment {
         // Security instructions are not evidence of the transaction's channel or state.
         val text = ParserRules.normalized(ParserRules.transactionText(input.body))
-        val completed = ParserRules.completedMovement.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || MovementTemplates.matches(text)
+        val completed = ParserRules.completedMovement.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.matches(text)
 
         if (ParserRules.otpOrVerification.containsMatchIn(ParserRules.normalized(input.body))) {
             return rejected("otp_or_verification")
@@ -51,7 +51,7 @@ class RuleBasedFinancialSmsParser {
         }
         val direction = detectDirection(text)
         val status = detectStatus(text, direction)
-        val decisive = direction != Direction.Unknown ||
+        val decisive = completed || direction != Direction.Unknown ||
             (status != TransactionStatus.Unknown && Regex("\\b(?:transaction|payment)\\b").containsMatchIn(text)) ||
             Regex("\\brefund(?:ed)?\\b").containsMatchIn(text)
         if (hasMultipleCandidateAmounts(text) && completed) {
@@ -70,9 +70,14 @@ class RuleBasedFinancialSmsParser {
             return rejected("no_decisive_transaction")
         }
 
-        val amount = safeSingleAmount(text)
         val channel = detectChannel(text)
         val transactionType = detectTransactionType(text, channel)
+        // INR limits in a foreign-currency alert are not INR transaction amounts.
+        if (CardAlertFormats.foreignAmount.containsMatchIn(text)) {
+            return assessment(ParseDecision.NeedsReview, null, direction, status, channel,
+                transactionType, 60, "unsupported_currency")
+        }
+        val amount = safeSingleAmount(text)
         if (amount == null) {
             return assessment(
                 decision = ParseDecision.NeedsReview,
@@ -87,7 +92,9 @@ class RuleBasedFinancialSmsParser {
         }
 
         val secondary = MovementTemplates.secondaryConfirmation(text)
-        val confidence = if (direction != Direction.Unknown && status != TransactionStatus.Unknown && !secondary) 96 else 70
+        val unfamiliarCard = CardAlertFormats.hasMovement(text) && CardAlertFormats.match(text) == null &&
+            !ParserRules.cardSpend.containsMatchIn(text) && !MovementTemplates.card(text)
+        val confidence = if (direction != Direction.Unknown && status != TransactionStatus.Unknown && !secondary && !unfamiliarCard) 96 else 70
         val decision = if (confidence >= 90) ParseDecision.Record else ParseDecision.NeedsReview
         return assessment(
             decision = decision,
@@ -97,13 +104,13 @@ class RuleBasedFinancialSmsParser {
             channel = channel,
             transactionType = transactionType,
             confidence = confidence,
-            ruleId = if (secondary) "secondary_payment_confirmation" else "currency_amount_transaction",
+            ruleId = if (secondary) "secondary_payment_confirmation" else if (unfamiliarCard) "unfamiliar_card_layout" else "currency_amount_transaction",
         )
     }
 
     private fun detectDirection(text: String): Direction {
         if (ParserRules.ownAccounts.containsMatchIn(text)) return Direction.Transfer
-        val debit = ParserRules.debit.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || MovementTemplates.debit(text)
+        val debit = ParserRules.debit.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.debit(text)
         val credit = ParserRules.credit.containsMatchIn(text) || MovementTemplates.credit(text)
         if (debit && credit) return if (ParserRules.isIciciAccountDebit(text)) Direction.Debit else Direction.Unknown
         if (debit) return Direction.Debit
@@ -121,7 +128,7 @@ class RuleBasedFinancialSmsParser {
     }
 
     private fun detectChannel(text: String): Channel = when {
-        ParserRules.cardSpend.containsMatchIn(text) || MovementTemplates.card(text) -> Channel.Card
+        ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.card(text) -> Channel.Card
         Regex("\\bupi\\b").containsMatchIn(text) -> Channel.UPI
         Regex("\\batm\\b").containsMatchIn(text) -> Channel.ATM
         Regex("\\bcard\\b").containsMatchIn(text) -> Channel.Card
@@ -207,6 +214,6 @@ class RuleBasedFinancialSmsParser {
         counterpartyLabel = null,
         confidence = confidence,
         ruleId = ruleId,
-        parserVersion = 5,
+        parserVersion = 6,
     )
 }

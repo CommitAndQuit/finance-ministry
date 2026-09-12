@@ -4,6 +4,19 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.6
+
+- Parser version 6 adds researched Indian card/account-alert variants, including
+  Kotak date-before-merchant, BOBCARD, SBI, Federal, IDFC FIRST and YES Bank card
+  payments. Balance, available-limit, outstanding and cycle-total amounts are ignored.
+  Unsupported foreign-currency card alerts and unfamiliar card layouts require review.
+- Add regression cases for selected public-format variants across PNB, IndusInd,
+  Indian Bank, NSDL, Punjab & Sind Bank, Kerala Bank and Bank of India. This is not
+  a claim of complete bank coverage; source provenance and negative variants are
+  recorded in the roadmap.
+- Validated the three reported Kotak and BOBCARD alerts in the Android emulator.
+  Automated evidence does not establish physical-device reliability or complete bank coverage.
+
 ## 0.1.0-alpha.5
 
 - Add opt-in last-three-calendar-month SMS import in Settings, with separate inbox
