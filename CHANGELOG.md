@@ -4,6 +4,11 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.10
+
+- Add Money out and Money in transaction filters. They work together with the
+  existing purpose and origin filters.
+
 ## 0.1.0-alpha.9
 
 - Show selected-month money in and money out on the dashboard; open the totals

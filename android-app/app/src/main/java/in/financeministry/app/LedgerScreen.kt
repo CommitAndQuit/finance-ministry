@@ -85,6 +85,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     var reviewWarning by remember { mutableStateOf(false) }
     var draftPurposeFilter by remember { mutableStateOf("All") }
     var draftOriginFilter by remember { mutableStateOf("All") }
+    var draftDirectionFilter by remember { mutableStateOf("All") }
     val ledgerListState = rememberLazyListState()
     BackHandler(enabled = settings && !form && selectedId == null) {
         if (settingsSection != null) settingsSection = null else settings = false
@@ -293,7 +294,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Transactions", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
                     TextButton(onClick = {
-                        draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); showFilters = true
+                        draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); draftDirectionFilter = directionPart(filter); showFilters = true
                     }, modifier = Modifier.semantics { contentDescription = "Filter transactions" }) { Text("Filters") }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -305,7 +306,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                     }, label = { Text("Needs review") })
                     if (filter !in listOf("All", "Review")) {
                         FilterChip(selected = true, onClick = {
-                            draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); showFilters = true
+                            draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); draftDirectionFilter = directionPart(filter); showFilters = true
                         }, label = { Text(filterLabel(filter)) })
                     }
                 }
@@ -387,6 +388,15 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
         } } }, enabled = !busy) { Text("Delete") } }, dismissButton = { TextButton(onClick = { deleteDialog = false }, enabled = !busy) { Text("Cancel") } })
     if (showFilters) AlertDialog(onDismissRequest = { showFilters = false }, title = { Text("Filter transactions") }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Money flow", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("Debit", "Credit").forEach { option ->
+                    FilterChip(selected = draftDirectionFilter == option, onClick = {
+                        draftDirectionFilter = if (draftDirectionFilter == option) "All" else option
+                    }, label = { Text(if (option == "Debit") "Money out" else "Money in") })
+                }
+            }
+            HorizontalDivider()
             Text("Purpose", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("Personal", "ForOthers", "Group", "SelfTransfer").forEach { option ->
@@ -406,12 +416,12 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             }
         }
     }, confirmButton = { TextButton(onClick = {
-        val next = combinedFilter(draftPurposeFilter, draftOriginFilter)
+        val next = combinedFilter(draftPurposeFilter, draftOriginFilter, draftDirectionFilter)
         if (next != filter || offset != 0) { filter = next; offset = 0; snapshot = null }
         showFilters = false
     }) { Text("Apply") } },
         dismissButton = { TextButton(onClick = {
-            draftPurposeFilter = "All"; draftOriginFilter = "All"
+            draftPurposeFilter = "All"; draftOriginFilter = "All"; draftDirectionFilter = "All"
             if (filter != "All" || offset != 0) { filter = "All"; offset = 0; snapshot = null }
             showFilters = false
         }, modifier = Modifier.semantics { contentDescription = "Clear transaction filters" }) { Text("Clear all") } })
@@ -444,13 +454,19 @@ private fun originPart(value: String): String = value.split("+").firstOrNull {
     it in listOf("Manual", "Edited")
 } ?: "All"
 
-private fun combinedFilter(purpose: String, origin: String): String = listOf(purpose, origin)
+private fun directionPart(value: String): String = value.split("+").firstOrNull {
+    it in listOf("Debit", "Credit")
+} ?: "All"
+
+private fun combinedFilter(purpose: String, origin: String, direction: String = "All"): String = listOf(purpose, origin, direction)
     .filter { it != "All" }.joinToString("+").ifBlank { "All" }
 
 private fun filterLabel(value: String): String = value.split("+").joinToString(" · ") { friendlyFilter(it) }
 
 private fun friendlyFilter(value: String): String = when (value) {
     "Review" -> "Needs review"
+    "Debit" -> "Money out"
+    "Credit" -> "Money in"
     "ForOthers" -> "For someone else"
     "SelfTransfer" -> "Self transfer"
     else -> friendly(value)

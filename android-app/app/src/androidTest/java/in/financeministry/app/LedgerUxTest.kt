@@ -55,6 +55,27 @@ class LedgerUxTest {
         } finally { runBlocking { repository.delete(id) } }
     }
 
+    @Test fun money_flow_filters_show_only_the_selected_direction() {
+        val repository = (rule.activity.application as FinanceMinistryApp).container.repository
+        val debitLabel = "Debit filter herb"; val creditLabel = "Credit filter comet"
+        val debit = runBlocking { repository.save(`in`.financeministry.app.data.ManualInput("31.11", `in`.financeministry.app.core.model.Direction.Debit, System.currentTimeMillis(), `in`.financeministry.app.core.model.TransactionType.Other, label = debitLabel)) }
+        val credit = runBlocking { repository.save(`in`.financeministry.app.data.ManualInput("42.22", `in`.financeministry.app.core.model.Direction.Credit, System.currentTimeMillis(), `in`.financeministry.app.core.model.TransactionType.Other, label = creditLabel)) }
+        try {
+            rule.onNodeWithText("Filters").performClick()
+            rule.onAllNodesWithText("Money out")[1].performClick()
+            rule.onNodeWithText("Apply").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText(debitLabel).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText(debitLabel).assertIsDisplayed()
+            rule.onNodeWithText(creditLabel).assertDoesNotExist()
+            rule.onNodeWithText("Filters").performClick()
+            rule.onNodeWithText("Money in").performClick()
+            rule.onNodeWithText("Apply").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText(creditLabel).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText(creditLabel).assertIsDisplayed()
+            rule.onNodeWithText(debitLabel).assertDoesNotExist()
+        } finally { runBlocking { repository.delete(debit); repository.delete(credit) } }
+    }
+
     @Test fun cancel_changed_form_keeps_draft_until_discard_confirmed() {
         rule.onNodeWithText("+ Add transaction").performClick()
         rule.onNodeWithText("Amount (INR)").performTextInput("42.00")

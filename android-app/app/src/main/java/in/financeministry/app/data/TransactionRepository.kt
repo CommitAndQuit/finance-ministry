@@ -46,8 +46,9 @@ class TransactionRepository(private val context: Context, private val namespace:
         val filterParts = filter.split("+")
         val purpose = filterParts.firstOrNull { it in listOf("Personal", "ForOthers", "Group", "SelfTransfer") } ?: "All"
         val origin = filterParts.firstOrNull { it in listOf("Manual", "Edited") } ?: "All"
+        val direction = filterParts.firstOrNull { it in listOf("Debit", "Credit") } ?: "All"
         require(filter == "All" || filter == "Review" || filterParts.all {
-            it in listOf("Manual", "Edited", "Personal", "ForOthers", "Group", "SelfTransfer")
+            it in listOf("Manual", "Edited", "Personal", "ForOthers", "Group", "SelfTransfer", "Debit", "Credit")
         })
         if (database == null && !context.getDatabasePath(dbName).exists()) return@locked LedgerSnapshot(emptyList(), BigInteger.ZERO, BigInteger.ZERO)
         val zone = ZoneId.systemDefault()
@@ -63,7 +64,7 @@ class TransactionRepository(private val context: Context, private val namespace:
             .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(row.amountMinor ?: 0) }
         val monthStart = month.atStartOfDay(zone).toInstant().toEpochMilli()
         val monthEnd = month.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val page = db().transactions().page(purpose, origin, filter == "Review", monthStart, monthEnd, 101, offset)
+        val page = db().transactions().page(purpose, origin, direction, filter == "Review", monthStart, monthEnd, 101, offset)
         fun personal(row: TransactionEntity): Long = row.personalShareMinor ?: row.amountMinor ?: 0
         fun owed(row: TransactionEntity): Long = ((row.amountMinor ?: 0) - personal(row) - row.repaidMinor).coerceAtLeast(0)
         val eligibleDebits = rows.filter { eligible(it) && it.direction == Direction.Debit.name }
