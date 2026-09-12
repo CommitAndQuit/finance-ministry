@@ -40,7 +40,7 @@ class AndroidHistoricalSmsSource(private val context: Context) : HistoricalSmsSo
     }
 }
 
-internal data class ImportCandidate(val row: TransactionEntity, val alternateFingerprint: ByteArray)
+internal data class ImportCandidate(val row: TransactionEntity, val alternateFingerprint: ByteArray, val transientSender: String)
 
 /** Normalized preview only; process death/navigation drops it without ledger writes. */
 class ImportPreview internal constructor(

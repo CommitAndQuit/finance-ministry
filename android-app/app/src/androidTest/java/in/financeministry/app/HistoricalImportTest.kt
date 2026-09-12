@@ -139,4 +139,17 @@ class HistoricalImportTest {
             assertTrue(repository.snapshot().rows.isEmpty())
         } finally { repository.eraseAll(); repository.close() }
     }
+
+    @Test fun imported_and_live_messages_use_the_same_conservative_source_resolution() = runBlocking {
+        grant()
+        val repository = repository()
+        val now = System.currentTimeMillis()
+        try {
+            val source = repository.addPaymentSource("Personal UPI", "Bank account", Channel.UPI, "HDFC", "7111")
+            val body = "INR 42 debited via UPI account XX7111"
+            val preview = repository.previewImport(source(HistoricalSms("HDFCBK", now, 0, body)), now)
+            repository.commitImport(preview)
+            assertEquals(source.id, repository.snapshot().rows.single().paymentSourceId)
+        } finally { repository.eraseAll(); repository.close() }
+    }
 }

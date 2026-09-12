@@ -2,7 +2,9 @@ package `in`.financeministry.app
 
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -17,7 +19,9 @@ class ManualEntryUiTest {
             rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
             rule.onNodeWithText("Settings").performClick()
+            rule.onNodeWithText("SMS and past messages").performClick()
             rule.onNodeWithText("Enable SMS capture").assertExists()
+            rule.onNodeWithText("Back").performClick()
             rule.onNodeWithText("Home").performClick()
             rule.onNodeWithText("+ Add transaction").assertIsDisplayed()
         } finally { repository.preferences.edit().putBoolean("sms_disclosure", previous).commit() }
@@ -29,15 +33,17 @@ class ManualEntryUiTest {
         try {
             rule.onNodeWithText("+ Add transaction").performClick()
             rule.onNodeWithText("Amount (INR)").performTextInput("512.34")
-            rule.onNodeWithText("Save transaction").performClick()
+            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
             try {
                 rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 51234L } } }
             } catch (failure: Throwable) {
                 throw AssertionError("Save did not finish. UI state: ${rule.onRoot().printToString()}", failure)
             }
             rule.onNodeWithText("+ Add transaction").assertIsDisplayed()
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("₹512.34 · Money out"))
-            rule.onNodeWithText("₹512.34 · Money out").assertIsDisplayed()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("₹512.34"))
+            rule.onNodeWithText("₹512.34").assertIsDisplayed()
+            val saved = runBlocking { repository.snapshot().rows.single { it.id !in before && it.amountMinor == 51234L } }
+            assertEquals("Debit", saved.direction)
         } finally {
             runBlocking { repository.snapshot().rows.filter { it.id !in before }.forEach { repository.delete(it.id) } }
         }

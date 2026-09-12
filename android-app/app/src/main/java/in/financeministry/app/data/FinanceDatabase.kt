@@ -31,6 +31,25 @@ data class TransactionEntity(
     val referenceHash: ByteArray? = null,
     val linkedOriginalId: String? = null,
     val importBatchId: String? = null,
+    val category: String = "Other",
+    val ownership: String = "Personal",
+    val groupLabel: String? = null,
+    val personalShareMinor: Long? = null,
+    val repaidMinor: Long = 0,
+    val paymentSourceId: String? = null,
+)
+
+/** A local nickname used to map a payment channel to one of the user's sources. */
+@Entity(tableName = "payment_sources")
+data class PaymentSourceEntity(
+    @PrimaryKey val id: String,
+    val nickname: String,
+    val kind: String,
+    val channel: String,
+    val bankName: String? = null,
+    val last4: String? = null,
+    val active: Boolean = true,
+    val createdAt: Long,
 )
 
 @Entity(tableName = "import_batches")
@@ -47,13 +66,18 @@ interface TransactionDao {
     @Update fun update(row: TransactionEntity)
     @Insert fun audit(rows: List<CorrectionEntity>)
     @Query("SELECT * FROM transactions ORDER BY effectiveTimestamp DESC LIMIT 500") fun latest(): List<TransactionEntity>
-    @Query("SELECT * FROM transactions WHERE (:filter = 'All' OR (:filter = 'Review' AND reviewState = 'NeedsReview') OR (:filter = 'Manual' AND sourceType = 'Manual') OR (:filter = 'Edited' AND isUserCorrected = 1)) ORDER BY effectiveTimestamp DESC, id DESC LIMIT :limit OFFSET :offset")
-    fun page(filter: String, limit: Int, offset: Int): List<TransactionEntity>
+    @Query("SELECT * FROM transactions WHERE ownership IN ('ForOther', 'Group')") fun repaymentCandidates(): List<TransactionEntity>
+    @Query("SELECT COUNT(*) FROM transactions WHERE reviewState = 'NeedsReview'") suspend fun reviewCount(): Int
+    @Query("SELECT * FROM transactions WHERE reviewState = 'NeedsReview' ORDER BY effectiveTimestamp DESC, id DESC LIMIT :limit OFFSET :offset")
+    fun reviewPage(limit: Int, offset: Int): List<TransactionEntity>
+    @Query("SELECT * FROM transactions WHERE effectiveTimestamp >= :start AND effectiveTimestamp < :end AND (:reviewOnly = 0 OR reviewState = 'NeedsReview') AND (:purpose = 'All' OR (:purpose = 'Personal' AND ownership = 'Personal') OR (:purpose = 'ForOthers' AND ownership = 'ForOther') OR (:purpose = 'Group' AND ownership = 'Group') OR (:purpose = 'SelfTransfer' AND (ownership = 'SelfTransfer' OR transactionType = 'SelfTransfer'))) AND (:origin = 'All' OR (:origin = 'Manual' AND sourceType = 'Manual') OR (:origin = 'Edited' AND isUserCorrected = 1)) ORDER BY effectiveTimestamp DESC, id DESC LIMIT :limit OFFSET :offset")
+    fun page(purpose: String, origin: String, reviewOnly: Boolean, start: Long, end: Long, limit: Int, offset: Int): List<TransactionEntity>
     @Query("SELECT * FROM transactions WHERE id = :id") fun get(id: String): TransactionEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM transactions WHERE sourceFingerprint = :fingerprint)") fun hasFingerprint(fingerprint: ByteArray): Boolean
     @Insert fun insertBatch(batch: ImportBatchEntity)
     @Query("SELECT * FROM import_batches ORDER BY createdAt DESC LIMIT 1") fun latestImport(): ImportBatchEntity?
-    @Query("SELECT * FROM transactions WHERE importBatchId = :batchId AND isUserCorrected = 0") fun untouchedImport(batchId: String): List<TransactionEntity>
+    @Query("SELECT * FROM transactions AS item WHERE importBatchId = :batchId AND isUserCorrected = 0 AND NOT EXISTS (SELECT 1 FROM corrections WHERE transactionId = item.id)")
+    fun untouchedImport(batchId: String): List<TransactionEntity>
     @Query("DELETE FROM import_batches WHERE id = :batchId") fun deleteBatch(batchId: String)
     @Query("SELECT * FROM transactions WHERE effectiveTimestamp >= :start AND effectiveTimestamp < :end") fun between(start: Long, end: Long): List<TransactionEntity>
     @Query("DELETE FROM transactions WHERE id = :id") fun delete(id: String)
@@ -62,9 +86,16 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE linkedOriginalId = :id") fun linkedTo(id: String): List<TransactionEntity>
     @Query("UPDATE transactions SET linkedOriginalId = NULL WHERE linkedOriginalId = :id") fun unlinkFrom(id: String)
     @Query("SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview'") fun reversedOriginals(): List<String>
+    @Insert(onConflict = OnConflictStrategy.ABORT) fun addSource(source: PaymentSourceEntity)
+    @Update fun updateSource(source: PaymentSourceEntity)
+    @Query("SELECT * FROM payment_sources WHERE active = 1 ORDER BY createdAt ASC") fun activeSources(): List<PaymentSourceEntity>
+    @Query("SELECT * FROM payment_sources ORDER BY createdAt ASC") fun allSources(): List<PaymentSourceEntity>
+    @Query("SELECT * FROM payment_sources WHERE id = :id") fun source(id: String): PaymentSourceEntity?
+    @Query("SELECT COUNT(*) FROM transactions WHERE paymentSourceId = :id") fun sourceUsageCount(id: String): Int
+    @Query("UPDATE payment_sources SET active = 0 WHERE id = :id") fun retireSource(id: String)
 }
 
-@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class], version = 3, exportSchema = true)
+@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class, PaymentSourceEntity::class], version = 4, exportSchema = true)
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun transactions(): TransactionDao
     private var connectionPassword: ByteArray? = null
@@ -75,6 +106,18 @@ abstract class FinanceDatabase : RoomDatabase() {
     }
 
     companion object {
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN category TEXT NOT NULL DEFAULT 'Other'")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN ownership TEXT NOT NULL DEFAULT 'Personal'")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN groupLabel TEXT")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN personalShareMinor INTEGER")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN repaidMinor INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN paymentSourceId TEXT")
+                db.execSQL("UPDATE transactions SET ownership = 'SelfTransfer', personalShareMinor = amountMinor WHERE transactionType = 'SelfTransfer'")
+                db.execSQL("CREATE TABLE IF NOT EXISTS payment_sources (id TEXT NOT NULL, nickname TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT NOT NULL, bankName TEXT, last4 TEXT, active INTEGER NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(id))")
+            }
+        }
         val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN importBatchId TEXT")
@@ -95,7 +138,7 @@ abstract class FinanceDatabase : RoomDatabase() {
                 System.loadLibrary("sqlcipher")
                 Logger.setTarget(NoopTarget())
                 db = Room.databaseBuilder(context, FinanceDatabase::class.java, name)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .openHelperFactory(SupportOpenHelperFactory(connectionPassword)).build()
                 db.connectionPassword = connectionPassword
                 db.openHelper.writableDatabase

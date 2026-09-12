@@ -23,6 +23,7 @@ import androidx.navigation.compose.rememberNavController
 
 class MainActivity : ComponentActivity() {
     private val request = mutableStateOf<Pair<String, Boolean>?>(null)
+    private val reviewRequestGeneration = androidx.compose.runtime.mutableIntStateOf(0)
     private val resumeGeneration = androidx.compose.runtime.mutableIntStateOf(0)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,7 +31,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) readRequest(intent)
         setContent {
             FinanceMinistryTheme {
-                LedgerApp((application as FinanceMinistryApp).container.repository, request.value, resumeGeneration.intValue) {
+                LedgerApp((application as FinanceMinistryApp).container.repository, request.value, resumeGeneration.intValue,
+                    reviewRequestGeneration.intValue) {
                     request.value = null
                     intent.removeExtra("transaction_id"); intent.removeExtra("edit")
                 }
@@ -39,7 +41,14 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() { super.onResume(); resumeGeneration.intValue++ }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); readRequest(intent) }
-    private fun readRequest(intent: Intent) { request.value = intent.getStringExtra("transaction_id")?.let { it to intent.getBooleanExtra("edit", false) } }
+    fun requestReview() { reviewRequestGeneration.intValue++ }
+    private fun readRequest(intent: Intent) {
+        request.value = intent.getStringExtra("transaction_id")?.let { it to intent.getBooleanExtra("edit", false) }
+        if (intent.getBooleanExtra("open_review", false)) {
+            requestReview()
+            intent.removeExtra("open_review")
+        }
+    }
 }
 
 @Composable

@@ -4,6 +4,25 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.8
+
+- Complete a review-response release hardening pass before packaging:
+  - preserve exact timestamps when users edit only non-financial fields,
+  keep imported/self-transfer records stable, and make source assignment safer for
+  manual and imported entries.
+- Add source-management UX and guided onboarding:
+  - user-registered payment sources, per-transaction source attribution,
+  and an explicit first-use guide.
+- Improve reminders and review workflows with deterministic scheduling, cancellation
+  and state refresh after app resume.
+- Tighten parser behavior for common edge cases from Indian bank/card SMS, including
+  known ICICI, BOB, Kotak, UPI and card variants; uncertain/unsupported forms stay
+  in Review instead of silently auto-saving.
+- Fix repayment/foreign-state presentation and unknown status handling, including
+  improved totals behavior and clearer debt expectations.
+- Add large-font/filter UX polish and additional regression coverage for
+  repository and receiver flows.
+
 ## 0.1.0-alpha.6
 
 - Parser version 6 adds researched Indian card/account-alert variants, including

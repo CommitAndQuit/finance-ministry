@@ -16,9 +16,21 @@ class ManualInputTest {
     @Test fun rejects_missing_fields_and_sensitive_identifiers() {
         assertThrows(IllegalArgumentException::class.java) { input("10").copy(direction = Direction.Unknown).validate() }
         assertThrows(IllegalArgumentException::class.java) { input("10").copy(type = TransactionType.Unknown).validate() }
+        assertThrows(IllegalArgumentException::class.java) { input("10").copy(status = TransactionStatus.Unknown).validate() }
         assertThrows(IllegalArgumentException::class.java) { input("10").copy(timestamp = 0).validate() }
         assertThrows(IllegalArgumentException::class.java) { input("10").copy(notes = "test@upi").validate() }
         assertThrows(IllegalArgumentException::class.java) { input("10").copy(accountHint = "12345678").validate() }
         input("10").copy(label = "Groceries", notes = "Weekly shop", accountHint = "4321").validate()
+    }
+    @Test fun group_and_for_other_payments_keep_the_users_share_separate() {
+        val group = input("3000").copy(ownership = SpendingOwnership.Group, groupLabel = "Dinner", personalShare = "1000", repaid = "500")
+        group.validate()
+        assertEquals(100000L, group.personalShareMinor())
+        assertEquals(50000L, group.repaidMinor())
+        val forOther = input("3000").copy(ownership = SpendingOwnership.ForOther, repaid = "3000")
+        forOther.validate()
+        assertEquals(0L, forOther.personalShareMinor())
+        assertThrows(IllegalArgumentException::class.java) { group.copy(repaid = "2001").validate() }
+        assertThrows(IllegalArgumentException::class.java) { group.copy(groupLabel = "").validate() }
     }
 }

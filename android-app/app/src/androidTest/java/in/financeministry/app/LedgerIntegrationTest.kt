@@ -94,12 +94,13 @@ class LedgerIntegrationTest {
         val repository = TransactionRepository(context, namespace())
         InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECEIVE_SMS)
         try {
+            val now = System.currentTimeMillis()
             assertNotNull(repository.save(input()))
-            assertFalse(repository.ingest(IncomingSms("SYNTHETIC", 1700000000000, "INR 42 debited via UPI")))
+            assertFalse(repository.ingest(IncomingSms("SYNTHETIC", now, "INR 42 debited via UPI")))
             repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
-            assertTrue(repository.ingest(IncomingSms("SYNTHETIC", 1700000000001, "INR 42 debited via UPI")) { error("Synthetic notification failure") })
+            assertTrue(repository.ingest(IncomingSms("SYNTHETIC", now + 1, "INR 42 debited via UPI")) { error("Synthetic notification failure") })
             var id: String? = null
-            assertTrue(repository.ingest(IncomingSms("SYNTHETIC", 1700000000002, "INR 43 debited via UPI")) {
+            assertTrue(repository.ingest(IncomingSms("SYNTHETIC", now + 2, "INR 43 debited via UPI")) {
                 id = it.id; TransactionNotifications.post(context, it, false)
             })
             assertNotNull(repository.get(id!!))
@@ -136,6 +137,7 @@ class LedgerIntegrationTest {
             try {
                 val old = helper.writableDatabase
                 old.execSQL("INSERT INTO transactions (id, sourceType, sourceTimestamp, effectiveTimestamp, amountMinor, currency, direction, status, channel, transactionType, confidence, reviewState, parserVersion, isUserCorrected, createdAt, updatedAt) VALUES ('legacy', 'Manual', 1, 1, 4200, 'INR', 'Debit', 'Successful', 'CashManual', 'Other', 0, 'Confirmed', 0, 1, 1, 1)")
+                old.execSQL("INSERT INTO transactions (id, sourceType, sourceTimestamp, effectiveTimestamp, amountMinor, currency, direction, status, channel, transactionType, confidence, reviewState, parserVersion, isUserCorrected, createdAt, updatedAt) VALUES ('legacy-transfer', 'Manual', 2, 2, 5100, 'INR', 'Transfer', 'Successful', 'CashManual', 'SelfTransfer', 0, 'Confirmed', 0, 1, 2, 2)")
                 old.execSQL("INSERT INTO corrections VALUES ('audit', 'legacy', 1, 'amountMinor', '4100', '4200')")
             } finally { helper.close(); password.fill(0) }
             val migrated = repository.get("legacy")!!
@@ -143,6 +145,8 @@ class LedgerIntegrationTest {
             assertTrue(migrated.isUserCorrected)
             assertNull(migrated.referenceHash)
             assertNull(migrated.linkedOriginalId)
+            assertEquals("SelfTransfer", repository.get("legacy-transfer")!!.ownership)
+            assertEquals("0", repository.snapshot().debit.toString())
             repository.close()
             val db = FinanceDatabase.open(context, DeviceSecrets(context, name).databasePassphrase(true), "$name.db")
             try { assertEquals("4200", db.transactions().corrections("legacy").single().newValue) }
@@ -230,6 +234,51 @@ class LedgerIntegrationTest {
         } finally { repository.eraseAll(); repository.close() }
     }
 
+    @Test fun outstanding_debt_and_review_backlog_are_not_limited_by_month_or_history_page() = runBlocking {
+        val name = namespace(); val repository = TransactionRepository(context, name)
+        val now = System.currentTimeMillis()
+        val old = now - 70L * 24 * 60 * 60 * 1000
+        try {
+            repository.save(input().copy(amount = "200", timestamp = old, ownership = SpendingOwnership.ForOther))
+            val db = FinanceDatabase.open(context, DeviceSecrets(context, name).databasePassphrase(true), "$name.db")
+            try {
+                db.runInTransaction {
+                    repeat(501) { index -> db.transactions().insert(TransactionEntity(
+                        id = "new-$index", sourceType = "Manual", sourceTimestamp = now + index,
+                        effectiveTimestamp = now + index, amountMinor = 100, direction = "Debit", status = "Successful",
+                        channel = "CashManual", transactionType = "Other", reviewState = "Confirmed",
+                        createdAt = now, updatedAt = now)) }
+                    db.transactions().insert(TransactionEntity(
+                        id = "old-review", sourceType = "SMS", sourceTimestamp = old, effectiveTimestamp = old,
+                        amountMinor = 300, direction = "Debit", status = "Successful", channel = "UPI",
+                        transactionType = "Other", reviewState = "NeedsReview", createdAt = old, updatedAt = old))
+                }
+            } finally { db.close() }
+            assertEquals("20000", repository.snapshot().outstandingRepayments.toString())
+            assertEquals(1, repository.reviewCount())
+            assertEquals("old-review", repository.reviewQueue().rows.single().id)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun metadata_only_edit_preserves_a_valid_reversal_link() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECEIVE_SMS)
+        try {
+            repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
+            val now = System.currentTimeMillis()
+            repository.ingest(IncomingSms("SYNTHETIC", now, "INR 42 debited via UPI account XX0000 Ref 000000000001"))
+            val original = repository.snapshot().rows.single()
+            repository.ingest(IncomingSms("SYNTHETIC", now + 1, "INR 42 debit transaction reversed via UPI account XX0000 Ref 000000000001"))
+            val reversal = repository.snapshot().rows.first()
+            assertEquals(original.id, reversal.linkedOriginalId)
+            repository.save(ManualInput("42", Direction.Debit, original.effectiveTimestamp,
+                TransactionType.Other, channel = Channel.valueOf(original.channel),
+                accountHint = "0000", category = "Food"), original.id)
+            assertEquals(original.id, repository.get(reversal.id)!!.linkedOriginalId)
+            assertEquals("0", repository.snapshot().debit.toString())
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
     @Test fun daily_totals_respect_dates_status_transfers_and_edits() = runBlocking {
         val repository = TransactionRepository(context, namespace())
         try {
@@ -243,10 +292,12 @@ class LedgerIntegrationTest {
             repository.save(base.copy(timestamp = at(today.withDayOfMonth(1).minusDays(1)), amount = "40.00"))
             repository.save(base.copy(direction = Direction.Credit, amount = "5.00"))
             repository.save(base.copy(direction = Direction.Transfer))
-            repository.save(base.copy(type = TransactionType.SelfTransfer))
-            for (status in listOf(TransactionStatus.Failed, TransactionStatus.Reversed, TransactionStatus.Pending, TransactionStatus.Unknown)) {
+            repository.save(base.copy(type = TransactionType.SelfTransfer,
+                ownership = `in`.financeministry.app.core.model.SpendingOwnership.SelfTransfer))
+            for (status in listOf(TransactionStatus.Failed, TransactionStatus.Reversed, TransactionStatus.Pending)) {
                 repository.save(base.copy(status = status))
             }
+            assertTrue(runCatching { repository.save(base.copy(status = TransactionStatus.Unknown)) }.isFailure)
             val snapshot = repository.snapshot(today = today)
             assertEquals("1000", snapshot.dailyDebit.toString())
             assertEquals("500", snapshot.dailyCredit.toString())
@@ -258,12 +309,87 @@ class LedgerIntegrationTest {
         } finally { repository.eraseAll(); repository.close() }
     }
 
+    @Test fun purpose_and_origin_filters_can_be_combined() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        try {
+            val groupId = repository.save(input().copy(amount = "44.00",
+                ownership = `in`.financeministry.app.core.model.SpendingOwnership.Group,
+                groupLabel = "Dinner", personalShare = "11.00"))
+            repository.save(input().copy(amount = "44.00",
+                ownership = `in`.financeministry.app.core.model.SpendingOwnership.Group,
+                groupLabel = "Dinner", personalShare = "11.00", notes = "Edited"), groupId)
+            repository.save(input().copy(amount = "19.00",
+                ownership = `in`.financeministry.app.core.model.SpendingOwnership.Personal))
+
+            val result = repository.snapshot(filter = "Group+Edited")
+            assertEquals(listOf(groupId), result.rows.map { it.id })
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun payment_sources_can_be_updated_and_retired_without_breaking_existing_transactions() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        try {
+            val source = repository.addPaymentSource("Everyday UPI", "Bank account", Channel.UPI, "HDFC", "7111")
+            val transactionId = repository.save(input().copy(channel = Channel.UPI, paymentSourceId = source.id))
+            val updated = repository.updatePaymentSource(source.id, "Primary UPI", "Bank account", Channel.UPI, "HDFC", "7111")
+            assertEquals("Primary UPI", updated.nickname)
+            val channelChange = runCatching {
+                repository.updatePaymentSource(source.id, "Primary card", "Credit card", Channel.Card, "HDFC", "7111")
+            }
+            assertTrue(channelChange.isFailure)
+            assertEquals(Channel.UPI.name, repository.paymentSources().single { it.id == source.id }.channel)
+
+            repository.deletePaymentSource(source.id)
+            assertFalse(repository.paymentSources().single { it.id == source.id }.active)
+            repository.save(input().copy(amount = "251.00", channel = Channel.UPI, paymentSourceId = source.id), transactionId)
+            assertEquals(25100L, repository.get(transactionId)!!.amountMinor)
+
+            val retiredFailure = runCatching {
+                repository.save(input().copy(channel = Channel.UPI, paymentSourceId = source.id))
+            }
+            assertTrue(retiredFailure.isFailure)
+            val mismatched = repository.addPaymentSource("Everyday card", "Credit card", Channel.Card, "HDFC", "9153")
+            val mismatchFailure = runCatching {
+                repository.save(input().copy(channel = Channel.UPI, paymentSourceId = mismatched.id))
+            }
+            assertTrue(mismatchFailure.isFailure)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun choosing_only_a_payment_source_preserves_review_and_financial_identity() = runBlocking {
+        val name = namespace(); val repository = TransactionRepository(context, name)
+        val now = System.currentTimeMillis() - 12_345
+        try {
+            val db = FinanceDatabase.open(context, DeviceSecrets(context, name).databasePassphrase(false), "$name.db")
+            try { db.transactions().insert(TransactionEntity(
+                id = "needs-source", sourceType = "SMS", sourceTimestamp = now, effectiveTimestamp = now,
+                amountMinor = 4200, direction = "Debit", status = "Successful", channel = "UPI",
+                transactionType = "Unknown", reviewState = "NeedsReview", confidence = 70,
+                importBatchId = "source-batch", createdAt = now, updatedAt = now))
+                db.transactions().insertBatch(ImportBatchEntity("source-batch", now, now - 1, now + 1, 1))
+            } finally { db.close() }
+            val source = repository.addPaymentSource("Primary UPI", "Bank account", Channel.UPI, "HDFC", "7111")
+            val before = repository.get("needs-source")!!
+            repository.updateTransactionPaymentSource(before.id, source.id)
+            val after = repository.get(before.id)!!
+            assertEquals(source.id, after.paymentSourceId)
+            assertEquals(before.copy(paymentSourceId = source.id, updatedAt = after.updatedAt), after)
+            assertEquals("NeedsReview", after.reviewState)
+            assertFalse(after.isUserCorrected)
+            val auditDb = FinanceDatabase.open(context, DeviceSecrets(context, name).databasePassphrase(true), "$name.db")
+            try { assertEquals(listOf("paymentSourceId"), auditDb.transactions().corrections(before.id).map { it.fieldName }) }
+            finally { auditDb.close() }
+            assertEquals(0, repository.undoImport("source-batch"))
+            assertNotNull(repository.get(before.id))
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
     @Test fun parsed_fields_survive_encrypted_storage_and_manual_correction() = runBlocking {
         val repository = TransactionRepository(context, namespace())
         InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECEIVE_SMS)
         try {
             repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
-            val sms = IncomingSms("SYNTHETIC", 1700000000000,
+            val sms = IncomingSms("SYNTHETIC", System.currentTimeMillis(),
                 "Sent Rs.42.00\nFrom TEST Bank A/C *0000\nTo TEST PERSON\nOn 01/01/26")
             assertTrue(repository.ingest(sms))
             val row = repository.snapshot().rows.single()
@@ -284,7 +410,8 @@ class LedgerIntegrationTest {
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECEIVE_SMS)
         instrumentation.uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.POST_NOTIFICATIONS)
         try {
-            val sms = IncomingSms("SYNTHETIC", 1700000000000, "INR 250.50 debited via UPI")
+            val now = System.currentTimeMillis()
+            val sms = IncomingSms("SYNTHETIC", now, "INR 250.50 debited via UPI")
             assertFalse(repository.ingest(sms))
             repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
             var notified: String? = null
@@ -297,8 +424,8 @@ class LedgerIntegrationTest {
             val notifications = context.getSystemService(NotificationManager::class.java).activeNotifications
             assertTrue(notifications.any { it.tag == notified })
             context.getSystemService(NotificationManager::class.java).cancel(notified, 1)
-            assertFalse(repository.ingest(IncomingSms("SYNTHETIC", 1700000000001, "OTP 123456 for INR 250 payment")))
-            assertTrue(repository.ingest(IncomingSms("SYNTHETIC", 1700000000002, "Your account debited by 250")))
+            assertFalse(repository.ingest(IncomingSms("SYNTHETIC", now + 1, "OTP 123456 for INR 250 payment")))
+            assertTrue(repository.ingest(IncomingSms("SYNTHETIC", now + 2, "Your account debited by 250")))
             assertEquals("NeedsReview", repository.snapshot().rows.first().reviewState)
             val secrets = DeviceSecrets(context, name)
             assertArrayEquals(secrets.hmacSource("a", 1, "bc"), secrets.hmacSource("a", 1, "bc"))

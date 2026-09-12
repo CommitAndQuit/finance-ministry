@@ -12,7 +12,7 @@ class AppLaunchSmokeTest {
 
     @Test
     fun launchRendersPrivateAlphaShell() {
-        activityRule.onNodeWithText("Finance Ministry").assertIsDisplayed()
+        activityRule.onNodeWithText("Your ledger").assertIsDisplayed()
         activityRule.onNodeWithText("+ Add transaction").assertIsDisplayed()
     }
 }

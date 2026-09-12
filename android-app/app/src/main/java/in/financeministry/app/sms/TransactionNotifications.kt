@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import `in`.financeministry.app.MainActivity
+import `in`.financeministry.app.R
 import `in`.financeministry.app.data.TransactionEntity
 import java.math.BigDecimal
 
@@ -33,11 +34,11 @@ object TransactionNotifications {
         }
         val amount = row.amountMinor?.let { "₹${BigDecimal.valueOf(it, 2).toPlainString()}" } ?: "Amount needs review"
         val view = action(false)
-        val notification = Notification.Builder(context, CHANNEL).setSmallIcon(android.R.drawable.stat_notify_more)
+        val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(if (row.reviewState == "NeedsReview") "Transaction needs review" else "Transaction recorded")
             .setContentText("$amount · ${row.direction} · ${row.status}")
             .setVisibility(Notification.VISIBILITY_PRIVATE).setAutoCancel(true).setContentIntent(view)
-            .setPublicVersion(Notification.Builder(context, CHANNEL).setSmallIcon(android.R.drawable.stat_notify_more).setContentTitle("Finance Ministry transaction").build())
+            .setPublicVersion(Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification).setContentTitle("Finance Ministry transaction").build())
             .addAction(Notification.Action.Builder(null, "View", view).build())
             .addAction(Notification.Action.Builder(null, "Edit", action(true)).build()).build()
         manager.notify(row.id, 1, notification)

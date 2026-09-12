@@ -2,6 +2,7 @@ package `in`.financeministry.app
 
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.semantics.SemanticsActions
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -33,7 +34,7 @@ class NotificationNavigationUiTest {
             rule.waitUntil(15000) { rule.onAllNodesWithText("Open another transaction?").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Keep editing").performClick()
             rule.onNodeWithText("701.01").assertExists()
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithText("Cancel").performSemanticsAction(SemanticsActions.OnClick)
             rule.onNodeWithText("Discard changes").performClick()
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
                 androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()

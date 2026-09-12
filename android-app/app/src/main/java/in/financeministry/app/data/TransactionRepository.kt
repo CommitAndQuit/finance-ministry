@@ -20,7 +20,10 @@ import java.util.UUID
 
 data class LedgerSnapshot(val rows: List<TransactionEntity>, val debit: BigInteger, val credit: BigInteger,
     val dailyDebit: BigInteger = BigInteger.ZERO, val dailyCredit: BigInteger = BigInteger.ZERO,
-    val hasOlder: Boolean = false)
+    val hasOlder: Boolean = false, val personalSpend: BigInteger = BigInteger.ZERO,
+    val paidForOthers: BigInteger = BigInteger.ZERO, val outstandingRepayments: BigInteger = BigInteger.ZERO,
+    val selectedMonth: LocalDate = LocalDate.now().withDayOfMonth(1),
+    val reversedOriginalIds: Set<String> = emptySet())
 
 /** All mutation, capture and erasure share one gate. No raw source is stored. */
 class TransactionRepository(private val context: Context, private val namespace: String = "finance") {
@@ -35,25 +38,102 @@ class TransactionRepository(private val context: Context, private val namespace:
     private var importEpoch = UUID.randomUUID().toString()
     private fun db(): FinanceDatabase = database ?: FinanceDatabase.open(context,
         secrets.databasePassphrase(context.getDatabasePath(dbName).exists()), dbName).also { database = it }
-    private suspend fun <T> locked(block: () -> T): T = withContext(Dispatchers.IO) { mutex.withLock { block() } }
+    private suspend fun <T> locked(block: suspend () -> T): T = withContext(Dispatchers.IO) { mutex.withLock { block() } }
 
-    suspend fun snapshot(offset: Int = 0, filter: String = "All", today: LocalDate = LocalDate.now()): LedgerSnapshot = locked {
+    suspend fun snapshot(offset: Int = 0, filter: String = "All", today: LocalDate = LocalDate.now(),
+        currentDay: LocalDate = today): LedgerSnapshot = locked {
         require(offset >= 0 && offset <= Int.MAX_VALUE - 101)
-        require(filter in listOf("All", "Review", "Manual", "Edited"))
+        val filterParts = filter.split("+")
+        val purpose = filterParts.firstOrNull { it in listOf("Personal", "ForOthers", "Group", "SelfTransfer") } ?: "All"
+        val origin = filterParts.firstOrNull { it in listOf("Manual", "Edited") } ?: "All"
+        require(filter == "All" || filter == "Review" || filterParts.all {
+            it in listOf("Manual", "Edited", "Personal", "ForOthers", "Group", "SelfTransfer")
+        })
         if (database == null && !context.getDatabasePath(dbName).exists()) return@locked LedgerSnapshot(emptyList(), BigInteger.ZERO, BigInteger.ZERO)
         val zone = ZoneId.systemDefault()
         val month = today.withDayOfMonth(1)
         val rows = db().transactions().between(month.atStartOfDay(zone).toInstant().toEpochMilli(), month.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli())
-        val dayStart = today.atStartOfDay(zone).toInstant().toEpochMilli()
-        val dayEnd = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val dayStart = currentDay.atStartOfDay(zone).toInstant().toEpochMilli()
+        val dayEnd = currentDay.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         val reversedOriginals = db().transactions().reversedOriginals().toSet()
-        fun sum(direction: Direction, daily: Boolean = false) = rows.filter { it.id !in reversedOriginals && (!daily || it.effectiveTimestamp in dayStart until dayEnd) && it.direction == direction.name && it.status == TransactionStatus.Successful.name &&
-            it.reviewState != ReviewState.NeedsReview.name && it.transactionType !in listOf(TransactionType.SelfTransfer.name, TransactionType.CardRepayment.name) }
+        fun eligible(row: TransactionEntity, daily: Boolean = false) = row.id !in reversedOriginals && (!daily || row.effectiveTimestamp in dayStart until dayEnd) && row.status == TransactionStatus.Successful.name &&
+            row.reviewState != ReviewState.NeedsReview.name && row.transactionType !in listOf(TransactionType.SelfTransfer.name, TransactionType.CardRepayment.name) && row.ownership != SpendingOwnership.SelfTransfer.name
+        fun sum(direction: Direction, daily: Boolean = false) = rows.filter { eligible(it, daily) && it.direction == direction.name &&
+            true }
             .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(row.amountMinor ?: 0) }
-        val page = db().transactions().page(filter, 101, offset)
+        val monthStart = month.atStartOfDay(zone).toInstant().toEpochMilli()
+        val monthEnd = month.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val page = db().transactions().page(purpose, origin, filter == "Review", monthStart, monthEnd, 101, offset)
+        fun personal(row: TransactionEntity): Long = row.personalShareMinor ?: row.amountMinor ?: 0
+        fun owed(row: TransactionEntity): Long = ((row.amountMinor ?: 0) - personal(row) - row.repaidMinor).coerceAtLeast(0)
+        val eligibleDebits = rows.filter { eligible(it) && it.direction == Direction.Debit.name }
         LedgerSnapshot(page.take(100), sum(Direction.Debit), sum(Direction.Credit),
-            sum(Direction.Debit, true), sum(Direction.Credit, true), page.size > 100)
+            sum(Direction.Debit, true), sum(Direction.Credit, true), page.size > 100,
+            eligibleDebits.fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(personal(row)) },
+            eligibleDebits.filter { it.ownership in listOf("ForOther", "Group") }.fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf((row.amountMinor ?: 0) - personal(row)) },
+            db().transactions().repaymentCandidates().filter { eligible(it) && it.direction == Direction.Debit.name }
+                .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(owed(row)) }, month, reversedOriginals)
     }
+
+    suspend fun reviewCount(): Int = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) 0 else db().transactions().reviewCount()
+    }
+
+    suspend fun reviewQueue(offset: Int = 0): LedgerSnapshot = locked {
+        require(offset >= 0 && offset <= Int.MAX_VALUE - 101)
+        if (database == null && !context.getDatabasePath(dbName).exists()) return@locked LedgerSnapshot(emptyList(), BigInteger.ZERO, BigInteger.ZERO)
+        val page = db().transactions().reviewPage(101, offset)
+        LedgerSnapshot(page.take(100), BigInteger.ZERO, BigInteger.ZERO, hasOlder = page.size > 100,
+            reversedOriginalIds = db().transactions().reversedOriginals().toSet())
+    }
+
+    suspend fun paymentSources(): List<PaymentSourceEntity> = locked { if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().allSources() }
+    suspend fun activePaymentSources(): List<PaymentSourceEntity> = locked { if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().activeSources() }
+    suspend fun addPaymentSource(nickname: String, kind: String, channel: Channel, bankName: String = "", last4: String = ""): PaymentSourceEntity = locked {
+        require(nickname.trim().length in 2..40) { "Give this source a short name." }
+        require(channel != Channel.Unknown && channel != Channel.CashManual) { "Choose UPI, card, or a bank transfer method." }
+        require(last4.isBlank() || last4.matches(Regex("[0-9]{4}"))) { "Use four digits or leave it blank." }
+        require(db().transactions().activeSources().none { it.nickname.equals(nickname.trim(), ignoreCase = true) }) { "Use a different source name." }
+        val source = PaymentSourceEntity(UUID.randomUUID().toString(), nickname.trim(), kind, channel.name,
+            bankName.trim().ifBlank { null }, last4.ifBlank { null }, true, System.currentTimeMillis())
+        db().transactions().addSource(source); revision.value++; source
+    }
+    suspend fun updatePaymentSource(id: String, nickname: String, kind: String, channel: Channel, bankName: String = "", last4: String = ""): PaymentSourceEntity = locked {
+        require(nickname.trim().length in 2..40) { "Give this source a short name." }
+        require(channel !in listOf(Channel.Unknown, Channel.CashManual, Channel.Other)) { "Choose UPI, card, or a bank transfer method." }
+        require(last4.isBlank() || last4.matches(Regex("[0-9]{4}"))) { "Use four digits or leave it blank." }
+        val dao = db().transactions()
+        val old = requireNotNull(dao.source(id)) { "This payment source no longer exists." }
+        require(old.active) { "This payment source is inactive." }
+        require(dao.sourceUsageCount(id) == 0 || old.channel == channel.name) {
+            "This source is already used by transactions. Keep its payment method or create a new source."
+        }
+        require(dao.activeSources().none { it.id != id && it.nickname.equals(nickname.trim(), ignoreCase = true) }) { "Use a different source name." }
+        val updated = old.copy(nickname = nickname.trim(), kind = kind, channel = channel.name,
+            bankName = bankName.trim().ifBlank { null }, last4 = last4.ifBlank { null })
+        dao.updateSource(updated); revision.value++; updated
+    }
+    suspend fun deletePaymentSource(id: String) = locked { db().transactions().retireSource(id); revision.value++ }
+    suspend fun updateTransactionPaymentSource(transactionId: String, sourceId: String): TransactionEntity = locked {
+        val dao = db().transactions()
+        val old = requireNotNull(dao.get(transactionId)) { "This transaction no longer exists." }
+        val source = requireNotNull(dao.source(sourceId)) { "Choose an available payment source." }
+        require(source.active) { "Choose an active payment source." }
+        require(source.channel == old.channel) { "The payment source does not support this payment method." }
+        if (old.paymentSourceId == sourceId) return@locked old
+        val now = maxOf(System.currentTimeMillis(), old.updatedAt + 1)
+        val updated = old.copy(paymentSourceId = sourceId, updatedAt = now)
+        db().runInTransaction {
+            dao.update(updated)
+            dao.audit(listOf(CorrectionEntity(UUID.randomUUID().toString(), old.id, now,
+                "paymentSourceId", old.paymentSourceId, sourceId)))
+        }
+        revision.value++
+        updated
+    }
+    /** Uses the sender only while processing the SMS; it is never persisted. */
+    private fun mappedSourceId(channel: String, hint: String?, sender: String, dao: TransactionDao): String? =
+        PaymentSourceMatcher.resolve(channel, hint, sender, dao.activeSources())
 
     suspend fun get(id: String): TransactionEntity? = locked {
         if (database == null && !context.getDatabasePath(dbName).exists()) null else db().transactions().get(id)
@@ -94,8 +174,10 @@ class TransactionRepository(private val context: Context, private val namespace:
                             parsed.amountMinor, parsed.currency, parsed.direction.name, parsed.status.name, parsed.channel.name,
                             parsed.transactionType.name, parsed.counterpartyLabel, parsed.maskedAccountHint,
                             confidence = parsed.confidence, reviewState = if (review) "NeedsReview" else "AutoRecorded",
-                            parserVersion = parsed.parserVersion, createdAt = now, updatedAt = now)
-                        candidates += ImportCandidate(row, alternate)
+                            parserVersion = parsed.parserVersion, createdAt = now, updatedAt = now,
+                            ownership = if (parsed.transactionType == TransactionType.SelfTransfer) SpendingOwnership.SelfTransfer.name else SpendingOwnership.Personal.name,
+                            personalShareMinor = parsed.amountMinor.takeIf { parsed.transactionType == TransactionType.SelfTransfer })
+                        candidates += ImportCandidate(row, alternate, message.sender)
                     }
                     seen.addAll(keys)
                 }
@@ -119,7 +201,10 @@ class TransactionRepository(private val context: Context, private val namespace:
                 for (candidate in preview.candidates) {
                     operation.ensureActive()
                     if (dao.hasFingerprint(candidate.row.sourceFingerprint!!) || dao.hasFingerprint(candidate.alternateFingerprint)) duplicates++
-                    else if (dao.insert(candidate.row.copy(importBatchId = batchId)) != -1L) inserted++ else duplicates++
+                    else {
+                        val mapped = mappedSourceId(candidate.row.channel, candidate.row.maskedAccountHint, candidate.transientSender, dao)
+                        if (dao.insert(candidate.row.copy(importBatchId = batchId, paymentSourceId = mapped)) != -1L) inserted++ else duplicates++
+                    }
                 }
                 operation.ensureActive()
                 if (inserted > 0) dao.insertBatch(ImportBatchEntity(batchId, System.currentTimeMillis(), preview.window.start, preview.window.end, inserted))
@@ -161,7 +246,11 @@ class TransactionRepository(private val context: Context, private val namespace:
             counterpartyLabel = parsed.counterpartyLabel,
             confidence = parsed.confidence, reviewState = if (parsed.decision == ParseDecision.Record) ReviewState.AutoRecorded.name else ReviewState.NeedsReview.name,
             parserVersion = parsed.parserVersion, createdAt = now, updatedAt = now, referenceHash = referenceHash)
+        if (parsed.transactionType == TransactionType.SelfTransfer) {
+            row = row.copy(ownership = SpendingOwnership.SelfTransfer.name, personalShareMinor = parsed.amountMinor)
+        }
         val dao = db().transactions()
+        row = row.copy(paymentSourceId = mappedSourceId(row.channel, row.maskedAccountHint, sms.sender, dao))
         var inserted = false
         db().runInTransaction {
             val adjustment = row.transactionType in listOf("Refund", "Reversal")
@@ -193,21 +282,42 @@ class TransactionRepository(private val context: Context, private val namespace:
         input.validate()
         val dao = db().transactions()
         val old = id?.let { requireNotNull(dao.get(it)) { "This transaction no longer exists." } }
+        input.paymentSourceId?.let { sourceId ->
+            val source = requireNotNull(dao.source(sourceId)) { "Choose an available payment source." }
+            require(source.channel == input.channel.name) { "The payment source does not support this payment method." }
+            require(source.active || old?.paymentSourceId == sourceId) { "Choose an active payment source." }
+        }
         val now = System.currentTimeMillis()
-        val row = TransactionEntity(id = old?.id ?: newId, sourceFingerprint = old?.sourceFingerprint,
+        var row = TransactionEntity(id = old?.id ?: newId, sourceFingerprint = old?.sourceFingerprint,
             sourceType = old?.sourceType ?: SourceType.Manual.name, sourceTimestamp = old?.sourceTimestamp ?: input.timestamp,
-            effectiveTimestamp = input.timestamp, amountMinor = input.amountMinor(), direction = input.direction.name, status = input.status.name,
-            channel = input.channel.name, transactionType = input.type.name, counterpartyLabel = input.label.trim().ifBlank { null },
+            effectiveTimestamp = input.timestamp, amountMinor = input.amountMinor(), currency = old?.currency ?: "INR",
+            direction = input.direction.name, status = input.status.name,
+            channel = input.channel.name, transactionType = input.normalizedType().name, counterpartyLabel = input.label.trim().ifBlank { null },
             userNotes = input.notes.trim().ifBlank { null }, maskedAccountHint = input.accountHint.takeIf { it.isNotEmpty() }?.let { "••••$it" },
             confidence = old?.confidence ?: 0, reviewState = ReviewState.Confirmed.name, parserVersion = old?.parserVersion ?: 0,
-            isUserCorrected = old != null, createdAt = old?.createdAt ?: now, updatedAt = now, importBatchId = old?.importBatchId)
+            isUserCorrected = old != null, createdAt = old?.createdAt ?: now, updatedAt = now, importBatchId = old?.importBatchId,
+            referenceHash = old?.referenceHash, linkedOriginalId = old?.linkedOriginalId,
+            category = input.category.trim(), ownership = input.normalizedOwnership().name,
+            groupLabel = input.groupLabel.trim().takeIf { input.normalizedOwnership() == SpendingOwnership.Group && it.isNotBlank() }, personalShareMinor = input.personalShareMinor(),
+            repaidMinor = input.repaidMinor(), paymentSourceId = input.paymentSourceId)
         db().runInTransaction {
             if (old == null) dao.insert(row) else {
-                // Corrections override automation; discard any links affected by the edit.
-                dao.unlinkFrom(old.id)
+                val linkSensitiveTypes = setOf("Refund", "Reversal", "SelfTransfer", "CardRepayment")
+                val linkSensitiveTypeChanged = old.transactionType != row.transactionType &&
+                    (old.transactionType in linkSensitiveTypes || row.transactionType in linkSensitiveTypes)
+                val financialIdentityChanged = old.amountMinor != row.amountMinor || old.currency != row.currency ||
+                    old.direction != row.direction || old.status != row.status || old.channel != row.channel ||
+                    linkSensitiveTypeChanged || old.effectiveTimestamp != row.effectiveTimestamp ||
+                    old.maskedAccountHint != row.maskedAccountHint
+                if (financialIdentityChanged) {
+                    dao.unlinkFrom(old.id)
+                    row = row.copy(linkedOriginalId = null)
+                }
                 fun fields(r: TransactionEntity) = mapOf("amountMinor" to r.amountMinor?.toString(), "direction" to r.direction,
                     "status" to r.status, "channel" to r.channel, "transactionType" to r.transactionType, "effectiveTimestamp" to r.effectiveTimestamp.toString(),
-                    "counterpartyLabel" to r.counterpartyLabel, "maskedAccountHint" to r.maskedAccountHint, "userNotes" to r.userNotes, "reviewState" to r.reviewState)
+                    "counterpartyLabel" to r.counterpartyLabel, "maskedAccountHint" to r.maskedAccountHint, "userNotes" to r.userNotes, "reviewState" to r.reviewState,
+                    "category" to r.category, "ownership" to r.ownership, "groupLabel" to r.groupLabel,
+                    "personalShareMinor" to r.personalShareMinor?.toString(), "repaidMinor" to r.repaidMinor.toString(), "paymentSourceId" to r.paymentSourceId)
                 val before = fields(old)
                 dao.update(row)
                 dao.audit(fields(row).filter { (key, value) -> before[key] != value }.map { (key, value) ->
@@ -234,6 +344,7 @@ class TransactionRepository(private val context: Context, private val namespace:
         if (file.exists()) check(context.deleteDatabase(dbName)) { "Database deletion failed. Capture remains off." }
         secrets.erase()
         if (namespace == "finance") context.getSystemService(NotificationManager::class.java).cancelAll()
+        if (namespace == "finance") `in`.financeministry.app.sms.ReviewReminder.cancel(context)
         revision.value++
     }
 

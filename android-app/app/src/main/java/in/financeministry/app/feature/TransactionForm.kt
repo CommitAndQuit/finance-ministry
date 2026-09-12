@@ -30,18 +30,29 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     var status by rememberSaveable(existing?.id) { mutableStateOf(existing?.status ?: "Successful") }
     var type by rememberSaveable(existing?.id) { mutableStateOf(existing?.transactionType ?: "Other") }
     var channel by rememberSaveable(existing?.id) { mutableStateOf(existing?.channel ?: "CashManual") }
-    var date by rememberSaveable(existing?.id) { mutableStateOf(LocalDateTime.ofInstant(Instant.ofEpochMilli(existing?.effectiveTimestamp ?: System.currentTimeMillis()), ZoneId.systemDefault()).format(formatter)) }
+    val initialDate = rememberSaveable(existing?.id) {
+        LocalDateTime.ofInstant(Instant.ofEpochMilli(existing?.effectiveTimestamp ?: System.currentTimeMillis()), ZoneId.systemDefault()).format(formatter)
+    }
+    var date by rememberSaveable(existing?.id) { mutableStateOf(initialDate) }
     var label by rememberSaveable(existing?.id) { mutableStateOf(existing?.counterpartyLabel ?: "") }
     var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.userNotes ?: "") }
     var hint by rememberSaveable(existing?.id) { mutableStateOf(existing?.maskedAccountHint?.takeLast(4) ?: "") }
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "Other") }
+    var ownership by rememberSaveable(existing?.id) { mutableStateOf(existing?.ownership ?: "Personal") }
+    var groupLabel by rememberSaveable(existing?.id) { mutableStateOf(existing?.groupLabel ?: "") }
+    var personalShare by rememberSaveable(existing?.id) { mutableStateOf(existing?.personalShareMinor?.let { BigDecimal.valueOf(it, 2).toPlainString() } ?: "") }
+    var repaid by rememberSaveable(existing?.id) { mutableStateOf(existing?.repaidMinor?.takeIf { it > 0 }?.let { BigDecimal.valueOf(it, 2).toPlainString() } ?: "") }
+    var sourceId by rememberSaveable(existing?.id) { mutableStateOf(existing?.paymentSourceId) }
+    var sources by remember { mutableStateOf<List<PaymentSourceEntity>>(emptyList()) }
     var optional by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val initialFields = rememberSaveable(existing?.id) { listOf(amount, direction, status, type, channel, date, label, notes, hint) }
-    val dirty = initialFields != listOf(amount, direction, status, type, channel, date, label, notes, hint)
+    val initialFields = rememberSaveable(existing?.id) { listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId) }
+    val dirty = initialFields != listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId)
     SideEffect { onDirtyChange(dirty) }
+    LaunchedEffect(existing?.id) { sources = repository.paymentSources() }
     val pickerTheme = if (androidx.compose.foundation.isSystemInDarkTheme()) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
     var discard by remember { mutableStateOf(false) }
     val leave = { if (!busy) { if (dirty) discard = true else onDone() }; Unit }
@@ -59,6 +70,25 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         }
         if (direction == "Unknown") Text("Choose money out, money in, or transfer.", color = MaterialTheme.colorScheme.error)
         OutlinedTextField(label, { label = it.take(60) }, label = { Text("Label (optional)") }, supportingText = { Text("A short description, not personal or account details.") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Choice("Category", category, listOf("Other", "Food", "Travel", "Shopping", "Bills", "Health", "Education", "Entertainment", "Cash")) { category = it }
+        Text("Who was this payment for?", style = MaterialTheme.typography.labelLarge)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Personal", "ForOther", "Group", "SelfTransfer").forEach { option ->
+                FilterChip(selected = ownership == option, onClick = {
+                    ownership = option
+                    type = if (option == "SelfTransfer") "SelfTransfer" else if (type == "SelfTransfer") "Other" else type
+                    if (option !in listOf("ForOther", "Group")) repaid = ""
+                    if (option != "Group") { groupLabel = ""; personalShare = "" }
+                }, label = { Text(friendly(option)) })
+            }
+        }
+        if (ownership == "Group") {
+            OutlinedTextField(groupLabel, { groupLabel = it.take(40) }, label = { Text("Group name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(personalShare, { personalShare = it }, label = { Text("Your share (INR)") }, supportingText = { Text("The rest is tracked as money others owe you.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        }
+        if (ownership == "ForOther" || ownership == "Group") {
+            OutlinedTextField(repaid, { repaid = it }, label = { Text("Already repaid (INR, optional)") }, supportingText = { Text("Update this when people repay you.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        }
         val selectedDate = LocalDateTime.parse(date, formatter)
         TextButton(onClick = {
             android.app.DatePickerDialog(context, pickerTheme, { _, year, month, day ->
@@ -68,12 +98,22 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         TextButton(onClick = {
             android.app.TimePickerDialog(context, pickerTheme, { _, hour, minute -> date = LocalDateTime.parse(date, formatter).withHour(hour).withMinute(minute).format(formatter) }, selectedDate.hour, selectedDate.minute, android.text.format.DateFormat.is24HourFormat(context)).show()
         }) { Text("Time: ${selectedDate.format(DateTimeFormatter.ofPattern("HH:mm"))}") }
-        Choice("Payment method", channel, Channel.entries.map { it.name }) { channel = it }
+        Choice("Payment method", channel, Channel.entries.filter { it !in listOf(Channel.Unknown, Channel.Other) }.map { it.name }) { chosen ->
+            channel = chosen
+            if (sources.none { it.id == sourceId && it.channel == chosen }) sourceId = null
+        }
+        if (sources.any { it.active && it.channel == channel } || sourceId != null) SourceChoice(sourceId, channel, sources) { sourceId = it }
         if (status == "Unknown") Choice("Payment status — please check", status, TransactionStatus.entries.map { it.name }) { status = it }
-        if (type == "Unknown") Choice("Transaction type — please choose", type, TransactionType.entries.map { it.name }) { type = it }
+        if (type == "Unknown") Choice("Transaction type — please choose", type, TransactionType.entries.map { it.name }) {
+            type = it
+            ownership = if (it == "SelfTransfer") "SelfTransfer" else if (ownership == "SelfTransfer") "Personal" else ownership
+        }
         TextButton(onClick = { optional = !optional }) { Text(if (optional) "Fewer details" else "More details") }
         if (optional) {
-            if (type != "Unknown") Choice("Transaction type", type, TransactionType.entries.map { it.name }) { type = it }
+            if (type != "Unknown") Choice("Transaction type", type, TransactionType.entries.map { it.name }) {
+                type = it
+                ownership = if (it == "SelfTransfer") "SelfTransfer" else if (ownership == "SelfTransfer") "Personal" else ownership
+            }
             if (status != "Unknown") Choice("Payment status", status, TransactionStatus.entries.map { it.name }) { status = it }
             OutlinedTextField(hint, { hint = it }, label = { Text("Account last 4 digits (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(notes, { notes = it.take(200) }, label = { Text("Notes (optional)") }, modifier = Modifier.fillMaxWidth())
@@ -86,8 +126,11 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
             Button(onClick = {
                 if (!busy) {
                     val input = try {
-                        ManualInput(amount, Direction.valueOf(direction), LocalDateTime.parse(date, formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                            TransactionType.valueOf(type), TransactionStatus.valueOf(status), Channel.valueOf(channel), label, notes, hint).also { it.validate() }
+                        val editedTimestamp = LocalDateTime.parse(date, formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        val timestamp = if (existing != null && date == initialDate) existing.effectiveTimestamp else editedTimestamp
+                        ManualInput(amount, Direction.valueOf(direction), timestamp,
+                            TransactionType.valueOf(type), TransactionStatus.valueOf(status), Channel.valueOf(channel), label, notes, hint,
+                            category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid, sourceId).also { it.validate() }
                     } catch (e: IllegalArgumentException) { error = e.message ?: "Check the fields."; null }
                     catch (_: java.time.DateTimeException) { error = "Enter a valid date and time as yyyy-MM-dd HH:mm."; null }
                     if (input != null) { busy = true; scope.launch {
@@ -104,6 +147,19 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         text = { Text("Your changes have not been saved.") },
         confirmButton = { TextButton(onClick = { discard = false; onDone() }) { Text("Discard changes") } },
         dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep editing") } })
+}
+
+@Composable private fun SourceChoice(value: String?, channel: String, sources: List<PaymentSourceEntity>, onChoose: (String?) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedSource = sources.firstOrNull { it.id == value }
+    val selected = selectedSource?.let { "${it.nickname}${if (it.active) "" else " (inactive)"}" } ?: "Not set"
+    Box {
+        OutlinedButton(onClick = { expanded = true }) { Text("Payment source: $selected") }
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Not set") }, onClick = { onChoose(null); expanded = false })
+            sources.filter { it.active && it.channel == channel }.forEach { source -> DropdownMenuItem(text = { Text(source.nickname) }, onClick = { onChoose(source.id); expanded = false }) }
+        }
+    }
 }
 
 @Composable private fun Choice(label: String, value: String, options: List<String>, onChoose: (String) -> Unit) {

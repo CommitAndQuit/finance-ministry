@@ -16,6 +16,8 @@ enum class Channel { UPI, Card, ATM, IMPS, NEFT, RTGS, BankTransfer, CashManual,
 enum class TransactionType { MerchantPayment, P2PTransfer, SelfTransfer, CardRepayment, SalaryIncome, Refund, Reversal, CashWithdrawal, Deposit, FeeCharge, Other, Unknown }
 enum class SourceType { SMS, Manual }
 enum class ReviewState { AutoRecorded, NeedsReview, Confirmed }
+/** Who ultimately bears this cost. Kept separate from the payment channel and category. */
+enum class SpendingOwnership { Personal, ForOther, Group, SelfTransfer }
 
 data class ParseAssessment(
     val decision: ParseDecision,
