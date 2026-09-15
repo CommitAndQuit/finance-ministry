@@ -23,7 +23,8 @@ data class LedgerSnapshot(val rows: List<TransactionEntity>, val debit: BigInteg
     val hasOlder: Boolean = false, val personalSpend: BigInteger = BigInteger.ZERO,
     val paidForOthers: BigInteger = BigInteger.ZERO, val outstandingRepayments: BigInteger = BigInteger.ZERO,
     val selectedMonth: LocalDate = LocalDate.now().withDayOfMonth(1),
-    val reversedOriginalIds: Set<String> = emptySet())
+    val reversedOriginalIds: Set<String> = emptySet(),
+    val categoryBalances: List<CategoryBalance> = emptyList())
 
 /** All mutation, capture and erasure share one gate. No raw source is stored. */
 class TransactionRepository(private val context: Context, private val namespace: String = "finance") {
@@ -40,7 +41,7 @@ class TransactionRepository(private val context: Context, private val namespace:
         secrets.databasePassphrase(context.getDatabasePath(dbName).exists()), dbName).also { database = it }
     private suspend fun <T> locked(block: suspend () -> T): T = withContext(Dispatchers.IO) { mutex.withLock { block() } }
 
-    suspend fun snapshot(offset: Int = 0, filter: String = "All", today: LocalDate = LocalDate.now(),
+    suspend fun snapshot(offset: Int = 0, filter: String = "All", sourceKindFilter: String = "All", today: LocalDate = LocalDate.now(),
         currentDay: LocalDate = today): LedgerSnapshot = locked {
         require(offset >= 0 && offset <= Int.MAX_VALUE - 101)
         val filterParts = filter.split("+")
@@ -64,7 +65,7 @@ class TransactionRepository(private val context: Context, private val namespace:
             .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(row.amountMinor ?: 0) }
         val monthStart = month.atStartOfDay(zone).toInstant().toEpochMilli()
         val monthEnd = month.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        val page = db().transactions().page(purpose, origin, direction, filter == "Review", monthStart, monthEnd, 101, offset)
+        val page = db().transactions().page(purpose, origin, direction, filter == "Review", sourceKindFilter, monthStart, monthEnd, 101, offset)
         fun personal(row: TransactionEntity): Long = row.personalShareMinor ?: row.amountMinor ?: 0
         fun owed(row: TransactionEntity): Long = ((row.amountMinor ?: 0) - personal(row) - row.repaidMinor).coerceAtLeast(0)
         val eligibleDebits = rows.filter { eligible(it) && it.direction == Direction.Debit.name }
@@ -73,7 +74,8 @@ class TransactionRepository(private val context: Context, private val namespace:
             eligibleDebits.fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(personal(row)) },
             eligibleDebits.filter { it.ownership in listOf("ForOther", "Group") }.fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf((row.amountMinor ?: 0) - personal(row)) },
             db().transactions().repaymentCandidates().filter { eligible(it) && it.direction == Direction.Debit.name }
-                .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(owed(row)) }, month, reversedOriginals)
+                .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(owed(row)) }, month, reversedOriginals,
+            db().transactions().categoryBalances())
     }
 
     suspend fun reviewCount(): Int = locked {
