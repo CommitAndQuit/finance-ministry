@@ -5,7 +5,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import `in`.financeministry.app.core.model.*
-import `in`.financeministry.app.parser.RuleBasedFinancialSmsParser
+import `in`.financeministry.app.parser.engine.TemplateEngineParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -34,7 +34,7 @@ class TransactionRepository(private val context: Context, private val namespace:
     val preferences = context.getSharedPreferences("${namespace}_settings", Context.MODE_PRIVATE)
     val revision = MutableStateFlow(0L)
     val eraseGeneration = MutableStateFlow(0L)
-    private val parser = RuleBasedFinancialSmsParser()
+    private val parser = TemplateEngineParser()
     private var importEpoch = UUID.randomUUID().toString()
     private fun db(): FinanceDatabase = database ?: FinanceDatabase.open(context,
         secrets.databasePassphrase(context.getDatabasePath(dbName).exists()), dbName).also { database = it }
