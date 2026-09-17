@@ -1,5 +1,6 @@
 package `in`.financeministry.app.feature
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,8 +20,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +46,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private data class MethodVisual(val label: String, val color: Color, val onColor: Color, val logo: String)
 
@@ -132,6 +138,7 @@ private fun MethodCarousel(methods: List<MethodSpend>, onAddPaymentMethod: () ->
     val listState = rememberLazyListState()
     val fling = rememberSnapFlingBehavior(listState)
     val pageCount = methods.size + 1
+    val total = methods.sumOf { it.netSpendMinor }.coerceAtLeast(1L)
     val activeIndex by remember { derivedStateOf { listState.firstVisibleItemIndex } }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -141,7 +148,7 @@ private fun MethodCarousel(methods: List<MethodSpend>, onAddPaymentMethod: () ->
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(methods.size) { i -> MethodCard(methods[i], cardWidth) }
+            items(methods.size) { i -> MethodCard(methods[i], cardWidth, methods[i].netSpendMinor.toFloat() / total) }
             item { AddMethodCard(cardWidth, onAddPaymentMethod) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -156,24 +163,45 @@ private fun MethodCarousel(methods: List<MethodSpend>, onAddPaymentMethod: () ->
 }
 
 @Composable
-private fun MethodCard(method: MethodSpend, width: Dp) {
+private fun MethodCard(method: MethodSpend, width: Dp, shareOfTotal: Float) {
     val brand = LocalBrand.current
     val v = visualFor(method.channel, brand)
     Box(Modifier.width(width).height(200.dp).clip(RoundedCornerShape(24.dp)).background(v.color).padding(20.dp)) {
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
-            Text(v.logo, fontSize = 18.sp, fontWeight = FontWeight.Black, color = v.onColor)
-            Column {
-                Text(v.label, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = v.onColor)
-                Text("${method.spendCount} transaction${if (method.spendCount == 1) "" else "s"}",
-                    fontSize = 12.sp, color = v.onColor.copy(alpha = 0.7f))
-                if (method.refundMinor > 0) Text("Refunds ${money(method.refundMinor)} netted",
-                    fontSize = 11.sp, color = v.onColor.copy(alpha = 0.6f))
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                Text(v.logo, fontSize = 18.sp, fontWeight = FontWeight.Black, color = v.onColor)
+                Column {
+                    Text(v.label, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = v.onColor)
+                    Text("${method.spendCount} transaction${if (method.spendCount == 1) "" else "s"}",
+                        fontSize = 12.sp, color = v.onColor.copy(alpha = 0.7f))
+                    if (method.refundMinor > 0) Text("Refunds ${money(method.refundMinor)} netted",
+                        fontSize = 11.sp, color = v.onColor.copy(alpha = 0.6f))
+                }
+                Column {
+                    Text(money(method.netSpendMinor), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = v.onColor)
+                    Text("this month", fontSize = 12.sp, color = v.onColor.copy(alpha = 0.7f))
+                }
             }
-            Column {
-                Text(money(method.netSpendMinor), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = v.onColor)
-                Text("this month", fontSize = 12.sp, color = v.onColor.copy(alpha = 0.7f))
-            }
+            MethodPie(shareOfTotal, v.onColor, v.onColor.copy(alpha = 0.2f), 120.dp)
         }
+    }
+}
+
+/** Donut showing this method's share of the month's total spend. */
+@Composable
+private fun MethodPie(fraction: Float, color: Color, trackColor: Color, size: Dp) {
+    val safe = fraction.coerceIn(0f, 1f)
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val strokeWidth = this.size.minDimension * 0.16f
+            val inset = strokeWidth / 2f
+            val arcSize = Size(this.size.width - strokeWidth, this.size.height - strokeWidth)
+            drawArc(color = trackColor, startAngle = 0f, sweepAngle = 360f, useCenter = false,
+                topLeft = Offset(inset, inset), size = arcSize, style = Stroke(strokeWidth, cap = StrokeCap.Round))
+            drawArc(color = color, startAngle = -90f, sweepAngle = 360f * safe, useCenter = false,
+                topLeft = Offset(inset, inset), size = arcSize, style = Stroke(strokeWidth, cap = StrokeCap.Round))
+        }
+        Text("${(safe * 100).roundToInt()}%", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
     }
 }
 
