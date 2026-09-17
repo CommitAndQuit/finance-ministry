@@ -49,7 +49,8 @@ fun transactionTime(millis: Long): String = DateTimeFormatter.ofPattern("dd MMM 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?, refreshGeneration: Int = 0,
-    reviewRequestGeneration: Int = 0, quickRequest: Boolean = false, consumeRequest: () -> Unit) {
+    reviewRequestGeneration: Int = 0, quickRequest: Boolean = false, openSettings: Boolean = false,
+    onExitHome: (() -> Unit)? = null, consumeRequest: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val revision by repository.revision.collectAsState()
@@ -73,7 +74,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     var filter by rememberSaveable { mutableStateOf("All") }
     var offset by rememberSaveable { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(false) }
-    var settings by rememberSaveable { mutableStateOf(false) }
+    var settings by rememberSaveable { mutableStateOf(openSettings) }
     var settingsSection by rememberSaveable { mutableStateOf<String?>(null) }
     var reviewAvailable by remember { mutableStateOf(false) }
     var reviewCount by remember { mutableIntStateOf(0) }
@@ -152,7 +153,13 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             consumeRequest()
         }
     }
-    Surface(Modifier.fillMaxSize()) {
+    // When launched as an overlay from the Spend Tracker home, never render the old ledger home:
+    // pop back once nothing else is showing, and stay blank while a tapped transaction loads.
+    val hasContent = settings || form || quickForm || selectedId != null || selected != null || filter == "Review"
+    if (onExitHome != null && !hasContent) {
+        if (request == null) LaunchedEffect("exit-home") { onExitHome() }
+        Surface(Modifier.fillMaxSize()) {}
+    } else Surface(Modifier.fillMaxSize()) {
         val ledgerScroll = rememberScrollState()
         val pageModifier = Modifier.safeDrawingPadding().fillMaxSize().padding(16.dp)
         Column(if (settings || (selected != null && !form)) pageModifier.verticalScroll(ledgerScroll) else pageModifier,

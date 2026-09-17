@@ -26,6 +26,17 @@ data class LedgerSnapshot(val rows: List<TransactionEntity>, val debit: BigInteg
     val reversedOriginalIds: Set<String> = emptySet(),
     val categoryBalances: List<CategoryBalance> = emptyList())
 
+/** Everything the Spend Tracker home needs for one month, computed under a single lock. */
+data class SpendOverview(
+    val month: LocalDate,
+    val totalSpendMinor: Long,
+    val transactionCount: Int,
+    val avgPerDayMinor: Long,
+    val topCategory: String?,
+    val methods: List<MethodSpend>,
+    val recentSpends: List<TransactionEntity>,
+)
+
 /** All mutation, capture and erasure share one gate. No raw source is stored. */
 class TransactionRepository(private val context: Context, private val namespace: String = "finance") {
     private val mutex = Mutex()
@@ -103,6 +114,47 @@ class TransactionRepository(private val context: Context, private val namespace:
     /** Genuine income per payment-method type (credits, excluding refunds/reversals), all time by default. */
     suspend fun incomeByMethod(start: Long = 0L, end: Long = Long.MAX_VALUE): List<MethodIncome> = locked {
         if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().incomeByMethod(start, end)
+    }
+
+    /** Running net spend for one calendar month (debits minus refunds), for the month pager. */
+    suspend fun monthSpendTotal(month: LocalDate = LocalDate.now().withDayOfMonth(1)): Long = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) return@locked 0L
+        val zone = ZoneId.systemDefault()
+        val m = month.withDayOfMonth(1)
+        val start = m.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = m.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        db().transactions().spendByMethod(start, end).filter { it.netSpendMinor > 0 }.sumOf { it.netSpendMinor }
+    }
+
+    /** Aggregated spend view for the Spend Tracker home for one calendar month. */
+    suspend fun spendOverview(month: LocalDate = LocalDate.now().withDayOfMonth(1),
+        today: LocalDate = LocalDate.now()): SpendOverview = locked {
+        val monthStart = month.withDayOfMonth(1)
+        if (database == null && !context.getDatabasePath(dbName).exists())
+            return@locked SpendOverview(monthStart, 0L, 0, 0L, null, emptyList(), emptyList())
+        val zone = ZoneId.systemDefault()
+        val start = monthStart.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = monthStart.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val dao = db().transactions()
+        val methods = dao.spendByMethod(start, end).filter { it.netSpendMinor > 0 }
+        val totalSpend = methods.sumOf { it.netSpendMinor }
+        val transactions = methods.sumOf { it.spendCount }
+        // Debit rows for the list and top-category, using the same spend eligibility as the aggregates.
+        val reversedOriginals = dao.reversedOriginals().toSet()
+        val debits = dao.between(start, end).filter { row ->
+            row.id !in reversedOriginals && row.direction == Direction.Debit.name &&
+                row.status == TransactionStatus.Successful.name && row.reviewState != ReviewState.NeedsReview.name &&
+                row.transactionType !in listOf(TransactionType.SelfTransfer.name, TransactionType.CardRepayment.name) &&
+                row.ownership != SpendingOwnership.SelfTransfer.name
+        }
+        val topCategory = debits.groupBy { it.category }
+            .mapValues { (_, rows) -> rows.sumOf { it.amountMinor ?: 0L } }
+            .maxByOrNull { it.value }?.key
+        // Average per elapsed day for the current month; per full month otherwise.
+        val daysElapsed = if (monthStart == today.withDayOfMonth(1)) today.dayOfMonth else monthStart.lengthOfMonth()
+        val avgPerDay = if (daysElapsed > 0) totalSpend / daysElapsed else 0L
+        SpendOverview(monthStart, totalSpend, transactions, avgPerDay, topCategory, methods,
+            debits.sortedByDescending { it.effectiveTimestamp }.take(100))
     }
     suspend fun addPaymentSource(nickname: String, kind: String, channel: Channel, bankName: String = "", last4: String = ""): PaymentSourceEntity = locked {
         require(nickname.trim().length in 2..40) { "Give this source a short name." }

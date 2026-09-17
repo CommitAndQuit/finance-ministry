@@ -2,7 +2,9 @@ package `in`.financeministry.app
 
 import android.os.Bundle
 import android.content.Intent
-import androidx.compose.runtime.mutableStateOf
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.*
+import `in`.financeministry.app.ui.FinanceMinistryTheme
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
@@ -32,10 +34,27 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) readRequest(intent)
         setContent {
             FinanceMinistryTheme {
-                LedgerApp((application as FinanceMinistryApp).container.repository, request.value, resumeGeneration.intValue,
-                    reviewRequestGeneration.intValue, quickRequest = quickRequest.value) {
-                    request.value = null
-                    intent.removeExtra("transaction_id"); intent.removeExtra("edit"); intent.removeExtra("quick_classify")
+                val repository = (application as FinanceMinistryApp).container.repository
+                var showLedger by remember { mutableStateOf(false) }
+                var openSettings by remember { mutableStateOf(false) }
+                // Deep links (notification tap, quick classify, review) go straight to the detailed ledger.
+                LaunchedEffect(request.value, quickRequest.value, reviewRequestGeneration.intValue) {
+                    if (request.value != null || quickRequest.value || reviewRequestGeneration.intValue > 0) {
+                        openSettings = false; showLedger = true
+                    }
+                }
+                if (showLedger) {
+                    BackHandler(enabled = true) { showLedger = false; openSettings = false }
+                    LedgerApp(repository, request.value, resumeGeneration.intValue,
+                        reviewRequestGeneration.intValue, quickRequest = quickRequest.value, openSettings = openSettings,
+                        onExitHome = { showLedger = false; openSettings = false }) {
+                        request.value = null
+                        intent.removeExtra("transaction_id"); intent.removeExtra("edit"); intent.removeExtra("quick_classify")
+                    }
+                } else {
+                    `in`.financeministry.app.feature.SpendTrackerScreen(repository,
+                        onOpenTransaction = { request.value = it to false; openSettings = false; showLedger = true },
+                        onOpenSettings = { openSettings = true; showLedger = true })
                 }
             }
         }
@@ -51,29 +70,6 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra("open_review")
         }
     }
-}
-
-@Composable
-fun FinanceMinistryTheme(content: @Composable () -> Unit) {
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    val colors = if (dark) androidx.compose.material3.darkColorScheme(
-        primary = androidx.compose.ui.graphics.Color(0xFF8AD5CA),
-        background = androidx.compose.ui.graphics.Color(0xFF101817),
-        surface = androidx.compose.ui.graphics.Color(0xFF101817),
-        surfaceVariant = androidx.compose.ui.graphics.Color(0xFF263C38),
-        surfaceContainerHighest = androidx.compose.ui.graphics.Color(0xFF263C38),
-        secondaryContainer = androidx.compose.ui.graphics.Color(0xFF224D45)
-    ) else androidx.compose.material3.lightColorScheme(
-        primary = androidx.compose.ui.graphics.Color(0xFF176B60),
-        onPrimary = androidx.compose.ui.graphics.Color.White,
-        primaryContainer = androidx.compose.ui.graphics.Color(0xFFD4EEE6),
-        background = androidx.compose.ui.graphics.Color(0xFFF7F9F6),
-        surface = androidx.compose.ui.graphics.Color(0xFFF7F9F6),
-        surfaceVariant = androidx.compose.ui.graphics.Color(0xFFE4EDE7),
-        surfaceContainerHighest = androidx.compose.ui.graphics.Color(0xFFE4EDE7),
-        secondaryContainer = androidx.compose.ui.graphics.Color(0xFFD4EEE6)
-    )
-    MaterialTheme(colorScheme = colors, content = content)
 }
 
 @Composable
