@@ -37,6 +37,8 @@ data class TransactionEntity(
     val personalShareMinor: Long? = null,
     val repaidMinor: Long = 0,
     val paymentSourceId: String? = null,
+    /** Issuing bank inferred from the SMS at capture time; null when unrecognized or manual. */
+    val bankName: String? = null,
 )
 
 /** A local nickname used to map a payment channel to one of the user's sources. */
@@ -61,6 +63,34 @@ data class CorrectionEntity(@PrimaryKey val id: String, val transactionId: Strin
     val fieldName: String, val previousValue: String?, val newValue: String?)
 
 data class CategoryBalance(val category: String, val balanceMinor: Long)
+
+/** Net spend for one payment-method type: debits minus refunds/reversals credited back. */
+data class MethodSpend(
+    val channel: String,
+    val grossSpendMinor: Long,
+    val refundMinor: Long,
+    val netSpendMinor: Long,
+    val spendCount: Int,
+)
+
+/** Genuine income for one payment-method type: credits excluding refunds/reversals/self-moves. */
+data class MethodIncome(
+    val channel: String,
+    val incomeMinor: Long,
+    val incomeCount: Int,
+)
+
+/** A distinct payment instrument derived from stored transactions, with usage and spend. */
+data class DiscoveredMethod(
+    val channel: String,
+    val bankName: String?,
+    val maskedAccountHint: String?,
+    val count: Int,
+    val firstSeen: Long,
+    val lastSeen: Long,
+    val outMinor: Long,
+    val inMinor: Long,
+)
 
 @Dao
 interface TransactionDao {
@@ -98,9 +128,39 @@ interface TransactionDao {
 
     @Query("SELECT s.kind AS category, SUM(CASE WHEN t.direction = 'Credit' THEN t.amountMinor ELSE -t.amountMinor END) AS balanceMinor FROM transactions t JOIN payment_sources s ON t.paymentSourceId = s.id WHERE t.status = 'Successful' AND t.reviewState != 'NeedsReview' AND t.paymentSourceId IS NOT NULL AND s.active = 1 GROUP BY s.kind")
     fun categoryBalances(): List<CategoryBalance>
+
+    @Query("SELECT channel AS channel, bankName AS bankName, maskedAccountHint AS maskedAccountHint, COUNT(*) AS count, MIN(effectiveTimestamp) AS firstSeen, MAX(effectiveTimestamp) AS lastSeen, COALESCE(SUM(CASE WHEN direction = 'Debit' THEN amountMinor ELSE 0 END), 0) AS outMinor, COALESCE(SUM(CASE WHEN direction = 'Credit' THEN amountMinor ELSE 0 END), 0) AS inMinor FROM transactions WHERE status = 'Successful' AND reviewState != 'NeedsReview' AND channel != 'Unknown' AND effectiveTimestamp >= :start AND effectiveTimestamp < :end GROUP BY channel, bankName, maskedAccountHint ORDER BY count DESC, lastSeen DESC")
+    fun discoveredMethods(start: Long, end: Long): List<DiscoveredMethod>
+
+    // Net spend per payment-method type: debits, minus refund/reversal credits, netted per channel.
+    // Mirrors the ledger's spend eligibility (excludes self-transfers, card repayments, non-successful,
+    // needs-review, and originals that were reversed). Reversal credits are status='Reversed' so they
+    // fall out of the 'Successful' filter, leaving successful refunds as the amount netted back.
+    @Query("SELECT channel AS channel, " +
+        "COALESCE(SUM(CASE WHEN direction = 'Debit' THEN amountMinor ELSE 0 END), 0) AS grossSpendMinor, " +
+        "COALESCE(SUM(CASE WHEN direction = 'Credit' THEN amountMinor ELSE 0 END), 0) AS refundMinor, " +
+        "COALESCE(SUM(CASE WHEN direction = 'Debit' THEN amountMinor ELSE -amountMinor END), 0) AS netSpendMinor, " +
+        "SUM(CASE WHEN direction = 'Debit' THEN 1 ELSE 0 END) AS spendCount " +
+        "FROM transactions WHERE status = 'Successful' AND reviewState != 'NeedsReview' " +
+        "AND transactionType NOT IN ('SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' " +
+        "AND channel != 'Unknown' AND effectiveTimestamp >= :start AND effectiveTimestamp < :end " +
+        "AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview') " +
+        "AND (direction = 'Debit' OR (direction = 'Credit' AND transactionType IN ('Refund', 'Reversal'))) " +
+        "GROUP BY channel ORDER BY netSpendMinor DESC")
+    fun spendByMethod(start: Long, end: Long): List<MethodSpend>
+
+    // Genuine income per payment-method type: successful credits, excluding refunds/reversals (those
+    // net against spend, not income), self-transfers, and card repayments.
+    @Query("SELECT channel AS channel, COALESCE(SUM(amountMinor), 0) AS incomeMinor, COUNT(*) AS incomeCount " +
+        "FROM transactions WHERE direction = 'Credit' AND status = 'Successful' AND reviewState != 'NeedsReview' " +
+        "AND transactionType NOT IN ('Refund', 'Reversal', 'SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' " +
+        "AND effectiveTimestamp >= :start AND effectiveTimestamp < :end " +
+        "AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview') " +
+        "GROUP BY channel ORDER BY incomeMinor DESC")
+    fun incomeByMethod(start: Long, end: Long): List<MethodIncome>
 }
 
-@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class, PaymentSourceEntity::class], version = 4, exportSchema = true)
+@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class, PaymentSourceEntity::class], version = 5, exportSchema = true)
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun transactions(): TransactionDao
     private var connectionPassword: ByteArray? = null
@@ -111,6 +171,11 @@ abstract class FinanceDatabase : RoomDatabase() {
     }
 
     companion object {
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN bankName TEXT")
+            }
+        }
         val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN category TEXT NOT NULL DEFAULT 'Other'")
@@ -143,7 +208,7 @@ abstract class FinanceDatabase : RoomDatabase() {
                 System.loadLibrary("sqlcipher")
                 Logger.setTarget(NoopTarget())
                 db = Room.databaseBuilder(context, FinanceDatabase::class.java, name)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .openHelperFactory(SupportOpenHelperFactory(connectionPassword)).build()
                 db.connectionPassword = connectionPassword
                 db.openHelper.writableDatabase

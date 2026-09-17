@@ -74,8 +74,15 @@ fun PaymentSourcesPanel(repository: TransactionRepository) {
     AlertDialog(onDismissRequest = onDismiss, title = { Text(if (existing == null) "Add payment source" else "Edit payment source") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(nickname, { nickname = it.take(40) }, label = { Text("Name, e.g. Personal UPI") }, singleLine = true)
-            SourceDropdown("Type", kind, listOf("UPI", "Bank account", "Credit card", "Debit card")) { kind = it; channel = if (it == "UPI") "UPI" else if (it.contains("card", true)) "Card" else "BankTransfer" }
-            SourceDropdown("Used for", channel, listOf("UPI", "Card", "BankTransfer", "IMPS", "NEFT", "RTGS")) { channel = it }
+            SourceDropdown("Type", kind, listOf("UPI", "Bank account", "Credit card", "Debit card", "Wallet")) { kind = it; channel = when {
+                it == "UPI" -> "UPI"
+                it == "Wallet" -> "Wallet"
+                it == "Credit card" -> "CreditCard"
+                it == "Debit card" -> "DebitCard"
+                it.contains("card", true) -> "Card"
+                else -> "BankTransfer"
+            } }
+            SourceDropdown("Used for", channel, listOf("UPI", "CreditCard", "DebitCard", "Card", "Wallet", "NetBanking", "BankTransfer", "IMPS", "NEFT", "RTGS")) { channel = it }
             OutlinedTextField(bank, { bank = it.take(40) }, label = { Text("Bank or institution (optional)") }, supportingText = { Text("For example, HDFC or ICICI.") }, singleLine = true)
             OutlinedTextField(last4, { last4 = it.filter(Char::isDigit).take(4) }, label = { Text("Last 4 digits (optional)") }, singleLine = true)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

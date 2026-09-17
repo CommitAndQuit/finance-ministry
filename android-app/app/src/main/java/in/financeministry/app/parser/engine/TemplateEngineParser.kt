@@ -7,6 +7,7 @@ import `in`.financeministry.app.core.model.ParseAssessment
 import `in`.financeministry.app.core.model.ParseDecision
 import `in`.financeministry.app.core.model.TransactionStatus
 import `in`.financeministry.app.core.model.TransactionType
+import `in`.financeministry.app.core.BankRegistry
 import `in`.financeministry.app.parser.ParserRules
 import java.math.BigInteger
 import java.util.Locale
@@ -15,6 +16,19 @@ class TemplateEngineParser(
     private val templateRepository: TemplateRepository = InMemoryTemplateRepository()
 ) {
     fun parse(input: IncomingSms): ParseAssessment {
+        val assessment = assess(input)
+        if (assessment.decision == ParseDecision.Reject) return assessment
+        // Sender id is the most reliable bank signal; fall back to the body when it is opaque.
+        val bank = BankRegistry.detect(input.sender) ?: BankRegistry.detect(input.body)
+        var result = if (bank == null) assessment else assessment.copy(bankName = bank)
+        // A generic card alert from a credit-card-only issuer (e.g. SBI Cards) is a credit card.
+        if (result.channel == Channel.Card && BankRegistry.isCreditCardIssuer(input.sender)) {
+            result = result.copy(channel = Channel.CreditCard)
+        }
+        return result
+    }
+
+    private fun assess(input: IncomingSms): ParseAssessment {
         val text = ParserRules.normalized(ParserRules.transactionText(input.body))
 
         // 1. Negative Guards
@@ -66,7 +80,7 @@ class TemplateEngineParser(
         val fallbackDirection = detectFallbackDirection(text)
         if (fallbackDirection == Direction.Unknown && ParserRules.debit.containsMatchIn(text) && ParserRules.credit.containsMatchIn(text)) {
             // It's a mixed movement not handled safely by ICICI exception
-            return assessment(ParseDecision.NeedsReview, safeSingleAmount(text), Direction.Unknown, TransactionStatus.Unknown, Channel.Unknown, TransactionType.Unknown, 60, "mixed_movement")
+            return assessment(ParseDecision.NeedsReview, safeSingleAmount(text), Direction.Unknown, TransactionStatus.Unknown, detectFallbackChannel(text), TransactionType.Unknown, 60, "mixed_movement")
         }
 
         // 2. Try strict templates
@@ -237,16 +251,30 @@ class TemplateEngineParser(
         else -> TransactionStatus.Unknown
     }
 
-    private fun detectFallbackChannel(text: String): Channel = when {
-        ParserRules.cardSpend.containsMatchIn(text) || hasCardMovementFallback(text) || hasCardFallback(text) -> Channel.Card
-        Regex("\\bupi\\b").containsMatchIn(text) -> Channel.UPI
-        Regex("\\batm\\b").containsMatchIn(text) -> Channel.ATM
-        Regex("\\bcard\\b").containsMatchIn(text) -> Channel.Card
-        Regex("\\bimps\\b").containsMatchIn(text) -> Channel.IMPS
-        Regex("\\bneft\\b").containsMatchIn(text) -> Channel.NEFT
-        Regex("\\brtgs\\b").containsMatchIn(text) -> Channel.RTGS
-        ParserRules.ownAccounts.containsMatchIn(text) -> Channel.BankTransfer
-        else -> Channel.Unknown
+    private fun detectFallbackChannel(text: String): Channel {
+        val cardLike = ParserRules.cardSpend.containsMatchIn(text) || hasCardMovementFallback(text) || hasCardFallback(text)
+        val creditCard = Regex("\\bcredit card\\b").containsMatchIn(text) || Regex("\\bbank cc\\b").containsMatchIn(text)
+        val debitCard = Regex("\\bdebit card\\b").containsMatchIn(text)
+        return when {
+            Regex("\\b(?:meal wallet|pluxee|sodexo|paytm wallet|mobikwik|freecharge|apay balance)\\b").containsMatchIn(text) -> Channel.Wallet
+            creditCard -> Channel.CreditCard
+            debitCard -> Channel.DebitCard
+            cardLike -> Channel.Card
+            // "UPI" as a word or as a "UPI:<ref>" tag (common in ICICI account statements).
+            Regex("\\bupi\\b").containsMatchIn(text) || Regex("upi:\\s*\\d").containsMatchIn(text) -> Channel.UPI
+            Regex("\\batm\\b").containsMatchIn(text) -> Channel.ATM
+            // Rails may appear bare or as an "Info<RAIL>*" / "<RAIL>*" tag, e.g. "InfoRTGS*ICICR120".
+            Regex("\\brtgs\\b").containsMatchIn(text) || Regex("rtgs\\*").containsMatchIn(text) -> Channel.RTGS
+            Regex("\\bneft\\b").containsMatchIn(text) || Regex("neft\\*").containsMatchIn(text) -> Channel.NEFT
+            Regex("\\bimps\\b").containsMatchIn(text) || Regex("imps\\*").containsMatchIn(text) -> Channel.IMPS
+            Regex("\\b(?:net ?banking|internet banking)\\b").containsMatchIn(text) -> Channel.NetBanking
+            Regex("\\bcard\\b").containsMatchIn(text) -> Channel.Card
+            ParserRules.ownAccounts.containsMatchIn(text) -> Channel.BankTransfer
+            // A *numbered* bank account with no card/rail signal is a plain account transfer,
+            // e.g. "ICICI Bank Account XX900" or "Ac XX0926". A bare "your account" stays Unknown.
+            Regex("\\b(?:bank acc(?:ount|t)?|accounts?|acct|ac|a/c)\\s+[*x•#]*\\d").containsMatchIn(text) -> Channel.BankTransfer
+            else -> Channel.Unknown
+        }
     }
 
     private fun detectFallbackTransactionType(text: String, channel: Channel): TransactionType = when {
@@ -257,7 +285,7 @@ class TemplateEngineParser(
         Regex("\\b(?:fee|charge)\\b").containsMatchIn(text) -> TransactionType.FeeCharge
         Regex("\\b(?:cash withdrawn|withdrawn)\\b").containsMatchIn(text) -> TransactionType.CashWithdrawal
         ParserRules.ownAccounts.containsMatchIn(text) -> TransactionType.SelfTransfer
-        channel == Channel.Card -> TransactionType.MerchantPayment
+        channel in listOf(Channel.Card, Channel.CreditCard, Channel.DebitCard, Channel.Wallet) -> TransactionType.MerchantPayment
         else -> TransactionType.Unknown
     }
 

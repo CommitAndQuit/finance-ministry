@@ -2,7 +2,7 @@ package `in`.financeministry.app
 
 import androidx.test.platform.app.InstrumentationRegistry
 import `in`.financeministry.app.core.model.IncomingSms
-import `in`.financeministry.app.parser.RuleBasedFinancialSmsParser
+import `in`.financeministry.app.parser.engine.TemplateEngineParser
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertTrue
@@ -18,7 +18,7 @@ class ParserCorpusEvaluationTest {
         val input = File(instrumentation.targetContext.filesDir, "parser-evaluation-input.json")
         val cases = JSONArray(input.readText())
         assertTrue(cases.length() > 0)
-        val parser = RuleBasedFinancialSmsParser()
+        val parser = TemplateEngineParser()
         val output = JSONArray()
         for (i in 0 until cases.length()) {
             val item = cases.getJSONObject(i)

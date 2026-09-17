@@ -39,12 +39,12 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
     var lastBatch by remember { mutableStateOf<ImportBatchEntity?>(null) }
     val dateFormat = remember { DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.systemDefault()) }
     fun date(value: Long) = dateFormat.format(Instant.ofEpochMilli(value))
-    fun scan() {
+    fun scan(src: HistoricalSmsSource) {
         if (busy) return
         preview = null; message = null; processed = 0; busy = true
         job = scope.launch {
             try {
-                preview = repository.previewImport(source ?: AndroidHistoricalSmsSource(context), progress = { processed = it })
+                preview = repository.previewImport(src, progress = { processed = it })
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: SecurityException) { message = "Android did not allow inbox access. Manual entry and new SMS capture are unchanged." }
             catch (_: Exception) { message = "Could not finish the scan. Nothing was imported. Check SMS permission and try again." }
@@ -52,7 +52,7 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
         }
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) scan() else message = "Inbox permission was not granted. You can still add transactions manually or use new SMS capture."
+        if (granted) scan(source ?: AndroidHistoricalSmsSource(context)) else message = "Inbox permission was not granted. You can still add transactions manually or use new SMS capture."
     }
     LaunchedEffect(revision) {
         try { lastBatch = repository.latestImport() } catch (_: Exception) { lastBatch = null }
@@ -61,6 +61,13 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
     Text("Past transactions", style = MaterialTheme.typography.titleMedium)
     Text("Optionally scan SMS still on this phone from the last three calendar months. Nothing is uploaded; original SMS are never changed.")
     OutlinedButton(onClick = { disclosure = true }, enabled = !busy) { Text("Import last 3 months") }
+    if (`in`.financeministry.app.BuildConfig.DEBUG) {
+        OutlinedButton(onClick = {
+            val file = java.io.File(context.getExternalFilesDir(null), "sms-history.txt")
+            if (!repository.historyPermissionGranted()) permission.launch(Manifest.permission.READ_SMS)
+            else scan(FileHistoricalSmsSource(file))
+        }, enabled = !busy) { Text("Import from test file (debug)") }
+    }
     if (busy) {
         LinearProgressIndicator(Modifier.fillMaxWidth())
         Text("Working… $processed messages scanned")
@@ -103,7 +110,7 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
         val window = ImportWindow.lastThreeMonths()
         AlertDialog(onDismissRequest = { disclosure = false }, title = { Text("Read existing SMS?") },
             text = { Text("Android grants access to the whole SMS inbox, including personal messages and OTPs. This scan only reads ${date(window.start)} through ${date(window.end)} and filters on-device. Only normalized financial fields are imported after your confirmation; raw SMS and senders are not saved. Import is optional and separate from new SMS capture. Deleted SMS, RCS and other apps are not included.") },
-            confirmButton = { TextButton(onClick = { disclosure = false; if (repository.historyPermissionGranted()) scan() else permission.launch(Manifest.permission.READ_SMS) }) { Text("I understand — scan") } },
+            confirmButton = { TextButton(onClick = { disclosure = false; if (repository.historyPermissionGranted()) scan(source ?: AndroidHistoricalSmsSource(context)) else permission.launch(Manifest.permission.READ_SMS) }) { Text("I understand — scan") } },
             dismissButton = { TextButton(onClick = { disclosure = false }) { Text("Not now") } })
     }
     if (undo) AlertDialog(onDismissRequest = { undo = false }, title = { Text("Undo last import?") },

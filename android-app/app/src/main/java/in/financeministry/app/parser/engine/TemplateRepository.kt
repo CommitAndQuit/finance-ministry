@@ -49,7 +49,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^$money\s+spent from pluxee\s+meal wallet,\s*card no\.(?:[x*]+(?<account>\d{4}))?\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+(?<merchant>.+?)\.\s*avl bal""",
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card, // Treating pluxee as card
+                channel = Channel.Wallet, // Pluxee is a meal-benefit wallet
                 transactionType = TransactionType.MerchantPayment
             ),
             // MovementTemplates.pluxeeFee
@@ -58,7 +58,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^$money\s+deducted from your pluxee card\s+[x*]+(?<account>\d{4})\s+towards online convenience fee\.\s*pluxee\s*$""",
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card,
+                channel = Channel.Wallet,
                 transactionType = TransactionType.FeeCharge
             ),
             // MovementTemplates.iciciCard
@@ -85,7 +85,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^autopay \(e-mandate\) success!\s*\r?\nfor (?<merchant>[^\r\n]+)\r?\ntxn amt:\s*$money\s*\r?\ndt:\d{2}/\d{2}/\d{2,4}\s*\r?\nvia:hdfc bank cc\s+(?<account>\d{4})\b""",
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card,
+                channel = Channel.CreditCard, // "cc" = credit card
                 transactionType = TransactionType.MerchantPayment,
                 decision = ParseDecision.NeedsReview, // secondary confirmation
                 ruleId = "secondary_payment_confirmation"
@@ -114,7 +114,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^alert!\s*$money\s+refunded by\s+(?<merchant>.+)\s+on\s+\d{2}/[a-z]{3}/\d{2,4}\s*& adjusted against hdfc bank credit card\s+(?<account>\d{4})\b""",
                 direction = Direction.Credit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card,
+                channel = Channel.CreditCard,
                 transactionType = TransactionType.Refund
             ),
             // MovementTemplates.initiatedRefund
@@ -132,7 +132,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^payment of $money has been received (?:on|towards) your (?:icici|axis) bank credit card [x*]+(?<account>\d{4})\b""",
                 direction = Direction.Credit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card,
+                channel = Channel.CreditCard,
                 transactionType = TransactionType.CardRepayment
             ),
             // MovementTemplates.repayment 2
@@ -141,7 +141,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^dear hdfcbank cardmember,\s*payment of $money received towards your credit card ending with (?<account>\d{4})\b""",
                 direction = Direction.Credit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card,
+                channel = Channel.CreditCard,
                 transactionType = TransactionType.CardRepayment
             ),
             // MovementTemplates.repayment 3
@@ -150,7 +150,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^hdfc bank cardmember, online payment of $money vide ref# [^\r\n]{1,80} was credited to your card ending (?<account>\d{4})\b""",
                 direction = Direction.Credit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Card,
+                channel = Channel.CreditCard,
                 transactionType = TransactionType.CardRepayment
             ),
             // Receipt: amazonReceipt
@@ -159,7 +159,7 @@ class InMemoryTemplateRepository : TemplateRepository {
                 regexPattern = """^payment of $money using apay balance is successful at a\.in\.""",
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
-                channel = Channel.Unknown,
+                channel = Channel.Wallet,
                 transactionType = TransactionType.Unknown,
                 decision = ParseDecision.NeedsReview,
                 ruleId = "secondary_payment_confirmation"

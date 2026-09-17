@@ -232,7 +232,11 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                         }
                         `in`.financeministry.app.feature.HistoricalImportPanel(repository)
                     }
-                    "Payment sources" -> `in`.financeministry.app.feature.PaymentSourcesPanel(repository)
+                    "Payment sources" -> {
+                        `in`.financeministry.app.feature.PaymentSourcesPanel(repository)
+                        Spacer(Modifier.height(16.dp))
+                        `in`.financeministry.app.feature.PaymentMethodsPanel(repository)
+                    }
                     "Review reminders" -> `in`.financeministry.app.feature.ReviewReminderPanel(repository, refreshGeneration)
                     "Data & privacy" -> {
                         Text("Your ledger stays encrypted on this device. The app has no bank connection or payment access.")

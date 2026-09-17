@@ -92,6 +92,18 @@ class TransactionRepository(private val context: Context, private val namespace:
 
     suspend fun paymentSources(): List<PaymentSourceEntity> = locked { if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().allSources() }
     suspend fun activePaymentSources(): List<PaymentSourceEntity> = locked { if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().activeSources() }
+    /** Distinct payment instruments observed in stored transactions, newest window inclusive. All time by default. */
+    suspend fun discoveredMethods(start: Long = 0L, end: Long = Long.MAX_VALUE): List<DiscoveredMethod> = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().discoveredMethods(start, end)
+    }
+    /** Net spend per payment-method type (debits minus refunds/reversals), all time by default. */
+    suspend fun spendByMethod(start: Long = 0L, end: Long = Long.MAX_VALUE): List<MethodSpend> = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().spendByMethod(start, end)
+    }
+    /** Genuine income per payment-method type (credits, excluding refunds/reversals), all time by default. */
+    suspend fun incomeByMethod(start: Long = 0L, end: Long = Long.MAX_VALUE): List<MethodIncome> = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else db().transactions().incomeByMethod(start, end)
+    }
     suspend fun addPaymentSource(nickname: String, kind: String, channel: Channel, bankName: String = "", last4: String = ""): PaymentSourceEntity = locked {
         require(nickname.trim().length in 2..40) { "Give this source a short name." }
         require(channel != Channel.Unknown && channel != Channel.CashManual) { "Choose UPI, card, or a bank transfer method." }
@@ -179,7 +191,7 @@ class TransactionRepository(private val context: Context, private val namespace:
                             confidence = parsed.confidence, reviewState = if (review) "NeedsReview" else "AutoRecorded",
                             parserVersion = parsed.parserVersion, createdAt = now, updatedAt = now,
                             ownership = if (parsed.transactionType == TransactionType.SelfTransfer) SpendingOwnership.SelfTransfer.name else SpendingOwnership.Personal.name,
-                            personalShareMinor = parsed.amountMinor.takeIf { parsed.transactionType == TransactionType.SelfTransfer })
+                            personalShareMinor = parsed.amountMinor.takeIf { parsed.transactionType == TransactionType.SelfTransfer }, bankName = parsed.bankName)
                         candidates += ImportCandidate(row, alternate, message.sender)
                     }
                     seen.addAll(keys)
@@ -246,7 +258,7 @@ class TransactionRepository(private val context: Context, private val namespace:
             sourceType = SourceType.SMS.name, sourceTimestamp = sms.receivedAtMillis, effectiveTimestamp = sms.receivedAtMillis,
             amountMinor = parsed.amountMinor, currency = parsed.currency, direction = parsed.direction.name, status = parsed.status.name,
             channel = parsed.channel.name, transactionType = parsed.transactionType.name, maskedAccountHint = parsed.maskedAccountHint,
-            counterpartyLabel = parsed.counterpartyLabel,
+            counterpartyLabel = parsed.counterpartyLabel, bankName = parsed.bankName,
             confidence = parsed.confidence, reviewState = if (parsed.decision == ParseDecision.Record) ReviewState.AutoRecorded.name else ReviewState.NeedsReview.name,
             parserVersion = parsed.parserVersion, createdAt = now, updatedAt = now, referenceHash = referenceHash)
         if (parsed.transactionType == TransactionType.SelfTransfer) {
