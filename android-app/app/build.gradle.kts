@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.navigation.compose)
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.animation:animation")
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
     implementation(libs.androidx.sqlite)

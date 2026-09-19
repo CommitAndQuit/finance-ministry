@@ -172,6 +172,68 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep editing") } })
 }
 
+/** Read-only "where this came from" panel plus an on-demand live lookup of the source SMS. */
+@Composable internal fun SmsProvenance(repository: TransactionRepository, existing: TransactionEntity) {
+    val scope = rememberCoroutineScope()
+    val timeFmt = remember { DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm").withZone(ZoneId.systemDefault()) }
+    val isSms = existing.sourceType == "SMS"
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<OriginalSms?>(null) }
+
+    HorizontalDivider()
+    Text("Where this came from", style = MaterialTheme.typography.labelLarge)
+    ProvenanceRow("Source", if (isSms) (if (existing.importBatchId != null) "SMS · imported" else "SMS · auto-captured") else friendly(existing.sourceType))
+    if (isSms) ProvenanceRow("Received", timeFmt.format(Instant.ofEpochMilli(existing.sourceTimestamp)))
+    existing.bankName?.let { ProvenanceRow("Bank", it) }
+    ProvenanceRow("Payment method", friendly(existing.channel))
+    existing.maskedAccountHint?.let { ProvenanceRow("Account", it) }
+    if (isSms) ProvenanceRow("Auto-detected", "Confidence ${existing.confidence}% · parser v${existing.parserVersion}")
+
+    if (isSms && existing.sourceFingerprint != null) {
+        OutlinedButton(onClick = {
+            if (!busy) { busy = true; scope.launch {
+                result = try { repository.findOriginalSms(existing.id) } catch (_: Exception) { OriginalSms.NotFound }
+                busy = false
+            } }
+        }, enabled = !busy) { Text(if (busy) "Searching inbox…" else "Find original SMS") }
+        Text("Reads your inbox live to show the message this was parsed from. The app never stores SMS text.", style = MaterialTheme.typography.bodySmall)
+    }
+
+    result?.let { r ->
+        AlertDialog(
+            onDismissRequest = { result = null },
+            confirmButton = { TextButton(onClick = { result = null }) { Text("Close") } },
+            title = {
+                Text(when (r) {
+                    is OriginalSms.Found -> "Original SMS"
+                    OriginalSms.NotFound -> "Not found"
+                    OriginalSms.PermissionDenied -> "Inbox access needed"
+                    OriginalSms.NotApplicable -> "No SMS source"
+                })
+            },
+            text = {
+                when (r) {
+                    is OriginalSms.Found -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("From ${r.sender} · ${timeFmt.format(Instant.ofEpochMilli(r.date))}", style = MaterialTheme.typography.labelMedium)
+                        androidx.compose.foundation.text.selection.SelectionContainer { Text(r.body, style = MaterialTheme.typography.bodyMedium) }
+                        Text("Read live from your inbox; not stored by the app.", style = MaterialTheme.typography.bodySmall)
+                    }
+                    OriginalSms.NotFound -> Text("No matching message is in your inbox. It may have been deleted, or was never saved there (for example, some injected test messages).")
+                    OriginalSms.PermissionDenied -> Text("Turn on inbox access from Settings → Import last 3 months, then try again.")
+                    OriginalSms.NotApplicable -> Text("This transaction was entered manually, so there is no source SMS.")
+                }
+            }
+        )
+    }
+}
+
+@Composable private fun ProvenanceRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
 @Composable private fun SourceChoice(value: String?, channel: String, sources: List<PaymentSourceEntity>, onChoose: (String?) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val selectedSource = sources.firstOrNull { it.id == value }

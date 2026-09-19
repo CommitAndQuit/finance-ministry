@@ -1,5 +1,9 @@
+@file:OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
+
 package `in`.financeministry.app.feature
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -49,9 +53,12 @@ import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private data class MethodVisual(val label: String, val color: Color, val onColor: Color, val logo: String)
+/** Shared-element key so a tapped method card morphs into the detail screen's background. */
+internal fun methodShareKey(channel: String): String = "method-bg-$channel"
 
-private fun visualFor(channel: String, brand: Brand): MethodVisual = when (channel) {
+internal data class MethodVisual(val label: String, val color: Color, val onColor: Color, val logo: String)
+
+internal fun visualFor(channel: String, brand: Brand): MethodVisual = when (channel) {
     "CreditCard" -> MethodVisual("Credit Card", brand.lime, brand.onAccentDark, "CARD")
     "Card" -> MethodVisual("Card", brand.lime, brand.onAccentDark, "CARD")
     "UPI" -> MethodVisual("UPI", brand.yellow, brand.onAccentDark, "UPI")
@@ -66,7 +73,7 @@ private fun visualFor(channel: String, brand: Brand): MethodVisual = when (chann
 }
 
 /** Single-letter badge per payment-method type, shown in the transaction row icon tile. */
-private fun methodLetter(channel: String): String = when (channel) {
+internal fun methodLetter(channel: String): String = when (channel) {
     "CreditCard", "Card" -> "C"
     "DebitCard" -> "D"
     "UPI" -> "U"
@@ -84,19 +91,18 @@ private fun methodLetter(channel: String): String = when (channel) {
 @Composable
 fun SpendTrackerScreen(
     repository: TransactionRepository,
+    month: String,
+    overview: SpendOverview?,
+    onMonthChange: (String) -> Unit,
+    timeFilter: String,
+    onTimeFilter: (String) -> Unit,
     onOpenTransaction: (String) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMethod: (channel: String, month: String) -> Unit = { _, _ -> },
+    sharedScope: SharedTransitionScope? = null,
+    animatedScope: AnimatedVisibilityScope? = null,
+    carouselState: androidx.compose.foundation.lazy.LazyListState? = null,
 ) {
-    val revision by repository.revision.collectAsState()
-    val eraseGen by repository.eraseGeneration.collectAsState()
-    var month by rememberSaveable { mutableStateOf(YearMonth.now().toString()) }
-    var overview by remember { mutableStateOf<SpendOverview?>(null) }
-    var timeFilter by rememberSaveable { mutableStateOf("This Month") }
-
-    LaunchedEffect(month, revision, eraseGen) {
-        overview = runCatching { repository.spendOverview(YearMonth.parse(month).atDay(1)) }.getOrNull()
-    }
-
     val brand = LocalBrand.current
     // Fixed full-screen gradient (light green bottom -> lighter top); the list scrolls over it.
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(brand.bgTop, brand.bgBottom)))) {
@@ -106,10 +112,10 @@ fun SpendTrackerScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             item { Header(onOpenSettings) }
-            item { MethodCarousel(overview?.methods.orEmpty(), onOpenSettings) }
-            item { MonthSpendPager(repository, month) { month = it } }
+            item { MethodCarousel(overview?.methods.orEmpty(), onOpenSettings, sharedScope, animatedScope, carouselState ?: rememberLazyListState()) { channel -> onOpenMethod(channel, month) } }
+            item { MonthSpendPager(repository, month, onMonthChange) }
             // White sheet: at least a full screen tall, so it takes over the viewport once scrolled up.
-            item { TransactionSheet(Modifier.fillParentMaxHeight(), overview, timeFilter, { timeFilter = it }, onOpenTransaction) }
+            item { TransactionSheet(Modifier.fillParentMaxHeight(), overview, timeFilter, onTimeFilter, onOpenTransaction) }
         }
     }
 }
@@ -132,11 +138,14 @@ private fun Header(onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun MethodCarousel(methods: List<MethodSpend>, onAddPaymentMethod: () -> Unit) {
+private fun MethodCarousel(
+    methods: List<MethodSpend>, onAddPaymentMethod: () -> Unit,
+    sharedScope: SharedTransitionScope?, animatedScope: AnimatedVisibilityScope?,
+    listState: androidx.compose.foundation.lazy.LazyListState, onOpenMethod: (String) -> Unit
+) {
     val brand = LocalBrand.current
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val cardWidth = screenWidth - 40.dp
-    val listState = rememberLazyListState()
     val fling = rememberSnapFlingBehavior(listState)
     val pageCount = methods.size + 1
     val total = methods.sumOf { it.netSpendMinor }.coerceAtLeast(1L)
@@ -149,7 +158,7 @@ private fun MethodCarousel(methods: List<MethodSpend>, onAddPaymentMethod: () ->
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(methods.size) { i -> MethodCard(methods[i], cardWidth, methods[i].netSpendMinor.toFloat() / total) }
+            items(methods.size) { i -> MethodCard(methods[i], cardWidth, methods[i].netSpendMinor.toFloat() / total, sharedScope, animatedScope, onOpenMethod) }
             item { AddMethodCard(cardWidth, onAddPaymentMethod) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
@@ -164,10 +173,19 @@ private fun MethodCarousel(methods: List<MethodSpend>, onAddPaymentMethod: () ->
 }
 
 @Composable
-private fun MethodCard(method: MethodSpend, width: Dp, shareOfTotal: Float) {
+private fun MethodCard(
+    method: MethodSpend, width: Dp, shareOfTotal: Float,
+    sharedScope: SharedTransitionScope?, animatedScope: AnimatedVisibilityScope?, onOpenMethod: (String) -> Unit
+) {
     val brand = LocalBrand.current
     val v = visualFor(method.channel, brand)
-    Box(Modifier.width(width).height(200.dp).clip(RoundedCornerShape(24.dp)).background(v.color).padding(20.dp)) {
+    val sharedMod = if (sharedScope != null && animatedScope != null) {
+        with(sharedScope) {
+            Modifier.sharedBounds(rememberSharedContentState(key = methodShareKey(method.channel)), animatedVisibilityScope = animatedScope)
+        }
+    } else Modifier
+    Box(Modifier.width(width).height(200.dp).then(sharedMod).clip(RoundedCornerShape(24.dp)).background(v.color)
+        .clickableMenu { onOpenMethod(method.channel) }.padding(20.dp)) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
                 Text(v.logo, fontSize = 18.sp, fontWeight = FontWeight.Black, color = v.onColor)
@@ -275,9 +293,8 @@ private fun TransactionSheet(
         modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             .background(scheme.surface).padding(horizontal = 20.dp).padding(top = 20.dp, bottom = 24.dp)
     ) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceBetween,
+        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically) {
-            Text("All Transactions", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = scheme.onSurface)
             Box {
                 TextButton(onClick = { menu = true }) { Text("$timeFilter ▾", fontSize = 14.sp, color = scheme.onSurface) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -299,13 +316,13 @@ private fun TransactionSheet(
 }
 
 @Composable
-private fun TransactionRow(row: TransactionEntity, onClick: () -> Unit) {
+internal fun TransactionRow(row: TransactionEntity, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val brand = LocalBrand.current
     val v = visualFor(row.channel, brand)
     val time = DateTimeFormatter.ofPattern("d MMM, HH:mm").withZone(ZoneId.systemDefault())
     Row(
-        Modifier.fillMaxWidth().clickableMenu(onClick).padding(vertical = 12.dp),
+        Modifier.fillMaxWidth().expandFromRow("txn-${row.id}").clickableMenu(onClick).padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(v.color), contentAlignment = Alignment.Center) {
@@ -321,4 +338,4 @@ private fun TransactionRow(row: TransactionEntity, onClick: () -> Unit) {
     }
 }
 
-private fun Modifier.clickableMenu(onClick: () -> Unit): Modifier = this.clickable { onClick() }
+internal fun Modifier.clickableMenu(onClick: () -> Unit): Modifier = this.clickable { onClick() }

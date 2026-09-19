@@ -37,6 +37,18 @@ data class SpendOverview(
     val recentSpends: List<TransactionEntity>,
 )
 
+/** Result of re-locating the SMS a transaction was parsed from. The body/sender are read live
+ *  from the inbox and never stored; only the keyed HMAC fingerprint is kept in the database. */
+sealed interface OriginalSms {
+    data class Found(val sender: String, val body: String, val date: Long) : OriginalSms
+    /** SMS-sourced, inbox readable, but no message matched (deleted, or never in the inbox). */
+    object NotFound : OriginalSms
+    /** Manual entry, or no stored fingerprint — nothing to look up. */
+    object NotApplicable : OriginalSms
+    /** Inbox access (READ_SMS) is not granted. */
+    object PermissionDenied : OriginalSms
+}
+
 /** All mutation, capture and erasure share one gate. No raw source is stored. */
 class TransactionRepository(private val context: Context, private val namespace: String = "finance") {
     private val mutex = Mutex()
@@ -156,6 +168,24 @@ class TransactionRepository(private val context: Context, private val namespace:
         SpendOverview(monthStart, totalSpend, transactions, avgPerDay, topCategory, methods,
             debits.sortedByDescending { it.effectiveTimestamp }.take(100))
     }
+    /** All spend transactions for one payment-method type in a calendar month, newest first.
+     *  Uses the same spend eligibility as the home cards, filtered to the given channel. */
+    suspend fun methodTransactions(channel: String, month: LocalDate = LocalDate.now().withDayOfMonth(1)): List<TransactionEntity> = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) return@locked emptyList()
+        val zone = ZoneId.systemDefault()
+        val m = month.withDayOfMonth(1)
+        val start = m.atStartOfDay(zone).toInstant().toEpochMilli()
+        val end = m.plusMonths(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val dao = db().transactions()
+        val reversedOriginals = dao.reversedOriginals().toSet()
+        dao.between(start, end).filter { row ->
+            row.channel == channel && row.id !in reversedOriginals && row.direction == Direction.Debit.name &&
+                row.status == TransactionStatus.Successful.name && row.reviewState != ReviewState.NeedsReview.name &&
+                row.transactionType !in listOf(TransactionType.SelfTransfer.name, TransactionType.CardRepayment.name) &&
+                row.ownership != SpendingOwnership.SelfTransfer.name
+        }.sortedByDescending { it.effectiveTimestamp }
+    }
+
     suspend fun addPaymentSource(nickname: String, kind: String, channel: Channel, bankName: String = "", last4: String = ""): PaymentSourceEntity = locked {
         require(nickname.trim().length in 2..40) { "Give this source a short name." }
         require(channel != Channel.Unknown && channel != Channel.CashManual) { "Choose UPI, card, or a bank transfer method." }
@@ -204,6 +234,29 @@ class TransactionRepository(private val context: Context, private val namespace:
 
     suspend fun get(id: String): TransactionEntity? = locked {
         if (database == null && !context.getDatabasePath(dbName).exists()) null else db().transactions().get(id)
+    }
+
+    /** Re-locate the original SMS a transaction was parsed from by matching the stored keyed HMAC
+     *  fingerprint against the live inbox. Nothing is stored; the text is read only to display now. */
+    suspend fun findOriginalSms(id: String, source: HistoricalSmsSource = AndroidHistoricalSmsSource(context)): OriginalSms {
+        val txn = get(id) ?: return OriginalSms.NotApplicable
+        val fingerprint = txn.sourceFingerprint
+        if (txn.sourceType != SourceType.SMS.name || fingerprint == null) return OriginalSms.NotApplicable
+        if (!historyPermissionGranted()) return OriginalSms.PermissionDenied
+        return withContext(Dispatchers.IO) {
+            // The message's received time equals the stored sourceTimestamp; scan a small window
+            // around it and confirm identity with the HMAC (fingerprint uses received or sent time).
+            val buffer = 24L * 60 * 60 * 1000
+            val window = ImportWindow((txn.sourceTimestamp - buffer).coerceAtLeast(0), txn.sourceTimestamp + buffer)
+            var found: OriginalSms = OriginalSms.NotFound
+            source.read(window) { message ->
+                if (found is OriginalSms.Found) return@read
+                val matches = secrets.hmacSource(message.sender, message.date, message.body).contentEquals(fingerprint) ||
+                    (message.sentDate > 0 && secrets.hmacSource(message.sender, message.sentDate, message.body).contentEquals(fingerprint))
+                if (matches) found = OriginalSms.Found(message.sender, message.body, message.date)
+            }
+            found
+        }
     }
 
     fun captureAllowed(): Boolean = preferences.getBoolean("sms_disclosure", false) &&
