@@ -90,6 +90,15 @@ class InMemoryTemplateRepository : TemplateRepository {
                 channel = Channel.Wallet,
                 transactionType = TransactionType.FeeCharge
             ),
+            // HSBC credit-card "used at" spend: "HSBC creditcard xxxxx7681 used at MERCHANT for INR amt on dd/mm/yy".
+            ParsingTemplate(
+                templateId = "hsbc_used_at",
+                regexPattern = """^hsbc creditcard\s+[x*]+(?<account>\d{4})\s+used at\s+(?<merchant>.+?)\s+for\s+(?:inr|rs\.?|₹)\s*(?<amount>[\d,.]+)\s+on\s+\d{1,2}/\d{1,2}/\d{2,4}\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.CreditCard,
+                transactionType = TransactionType.MerchantPayment
+            ),
             // MovementTemplates.iciciCard
             ParsingTemplate(
                 templateId = "icici_card",
@@ -97,6 +106,15 @@ class InMemoryTemplateRepository : TemplateRepository {
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
                 channel = Channel.Card,
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Paytm Payments Bank UPI spend: "Rs.169.00 sent to <vpa> from PPBL a/c 91XX6831. UPI Ref:...".
+            ParsingTemplate(
+                templateId = "paytm_upi_sent",
+                regexPattern = """^rs\.?\s*(?<amount>[\d,.]+)\s+sent to\s+(?<merchant>\S+)\s+from\s+ppbl\s+a/c\s+[0-9x]+(?<account>\d{4})\.\s*upi ref:""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.UPI,
                 transactionType = TransactionType.MerchantPayment
             ),
             // MovementTemplates.mandate

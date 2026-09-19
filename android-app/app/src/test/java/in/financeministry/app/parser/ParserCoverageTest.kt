@@ -187,6 +187,25 @@ class ParserCoverageTest {
         assertEquals(ParseDecision.NeedsReview, ambiguous.decision)
     }
 
+    @Test fun hsbc_used_at_credit_card_spend_records_despite_limit_and_due() {
+        val r = parse("HSBC creditcard xxxxx7681 used at zepto marketplace private for INR 189.00 on 20/06/26.Limit Rs 1281754.10 Due Rs -1754.10.Report fraud on +914061268002")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(18900L, r.amountMinor)
+        assertEquals(Direction.Debit, r.direction)
+        assertEquals(Channel.CreditCard, r.channel)
+        assertEquals("••••7681", r.maskedAccountHint)
+    }
+
+    @Test fun paytm_upi_sent_records_despite_balance_link() {
+        val r = parse("Rs.169.00 sent to credpay.zepto@axisb from PPBL a/c 91XX6831. UPI Ref:232926156001. Balance:https://m.paytm.me/pbCheckBal. Query:http://m.p-y.tm/care")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(16900L, r.amountMinor)
+        assertEquals(Direction.Debit, r.direction)
+        assertEquals(Channel.UPI, r.channel)
+        assertEquals("credpay.zepto@axisb", r.counterpartyLabel)
+        assertEquals("••••6831", r.maskedAccountHint)
+    }
+
     @Test fun onecard_inr_spend_records_but_foreign_currency_goes_to_review() {
         val inr = parse("Fresh picks! You've spent Rs. 227.00 at Swiggy Limited with your Federal One Credit Card ending in XX0000. Reward points are now in your basket. To dispute this payment, click: m.1crd.in/OneCrd/shcut")
         assertEquals(ParseDecision.Record, inr.decision)
