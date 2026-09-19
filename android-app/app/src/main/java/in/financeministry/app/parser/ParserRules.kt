@@ -19,6 +19,13 @@ internal object ParserRules {
         val match = iciciDebitRecipientCredit.matchEntire(text) ?: return false
         return !accountOrMovement.containsMatchIn(match.groups["recipient"]!!.value)
     }
+    // An ICICI message that names BOTH a masked source account and a masked destination
+    // account is self-sufficient evidence of an internal transfer between the customer's
+    // own accounts (e.g. "Acct XX900 debited ... & Acct XX958 credited. IMPS:..."). This is
+    // distinct from a UPI/name recipient credit, which stays ambiguous (may be a real payment).
+    val iciciSelfTransfer = Regex(
+        """icici\s+bank\s+acct\s+[x*]+\d{3,4}\s+debited\s+(?:for|with)\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s+on\s+\d{1,2}-[a-z]{3}-\d{2,4}\s*&\s*acct\s+[x*]+\d{3,4}\s+credited\b"""
+    )
     val transfer = Regex("\\b(?:transferred|transfer)\\b")
     val ownAccounts = Regex("\\b(?:between|to) your own accounts?\\b")
     val failed = Regex("\\b(?:failed|declined|decline|unsuccessful)\\b")

@@ -234,6 +234,8 @@ class TemplateEngineParser(
 
     private fun detectFallbackDirection(text: String): Direction {
         if (ParserRules.ownAccounts.containsMatchIn(text)) return Direction.Transfer
+        // A single SMS naming both a masked source and destination own-account is a self-transfer.
+        if (ParserRules.iciciSelfTransfer.containsMatchIn(text)) return Direction.Transfer
         val debit = ParserRules.debit.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || hasCardMovementFallback(text) || hasDebitFallback(text)
         val credit = ParserRules.credit.containsMatchIn(text) || hasCreditFallback(text)
         if (debit && credit) return if (ParserRules.isIciciAccountDebit(text)) Direction.Debit else Direction.Unknown
@@ -284,7 +286,7 @@ class TemplateEngineParser(
         Regex("\\bsalary\\b").containsMatchIn(text) -> TransactionType.SalaryIncome
         Regex("\\b(?:fee|charge)\\b").containsMatchIn(text) -> TransactionType.FeeCharge
         Regex("\\b(?:cash withdrawn|withdrawn)\\b").containsMatchIn(text) -> TransactionType.CashWithdrawal
-        ParserRules.ownAccounts.containsMatchIn(text) -> TransactionType.SelfTransfer
+        ParserRules.ownAccounts.containsMatchIn(text) || ParserRules.iciciSelfTransfer.containsMatchIn(text) -> TransactionType.SelfTransfer
         channel in listOf(Channel.Card, Channel.CreditCard, Channel.DebitCard, Channel.Wallet) -> TransactionType.MerchantPayment
         else -> TransactionType.Unknown
     }
@@ -322,11 +324,27 @@ class TemplateEngineParser(
 
     private fun hasMovementFallback(text: String): Boolean = hasDebitFallback(text) || hasCreditFallback(text)
 
-    private fun hasSecondaryConfirmation(text: String): Boolean = Regex("""^autopay \(e-mandate\) success!\s*\r?\nfor [^\r\n]+\r?\ntxn amt:\s*(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\ndt:\d{2}/\d{2}/\d{2,4}\s*\r?\nvia:hdfc bank cc\s+\d{4}\b""").containsMatchIn(text) || Regex("""^payment of (?:rs\.?|inr|₹)\s*[\d,.]+ using apay balance is successful at a\.in\.""").containsMatchIn(text) || Regex("""^dear user,\s*challan payment of (?:rs\.?|inr|₹)\s*[\d,.]+ against pan/tan \S+ for assessment year \d{4} has been successfully paid\.""").containsMatchIn(text) || Regex("""^hi [^,\r\n]{1,80}, we have received a payment of (?:rs\.?|inr|₹)\s*[\d,.]+ for your airtel wi-fi id \S+""").containsMatchIn(text) || Regex("""^we confirm receipt of online payment made via bbpay for ([\d,.]+) against lpg refill booking no:\s*\d+\.your delivery authentication code is \d+\s*- hpcl\s*$""").containsMatchIn(text)
+    // Amazon Pay wallet spend: primary evidence of a wallet debit (no separate bank SMS follows a
+    // pure-balance spend), so it auto-records rather than being treated as a secondary confirmation.
+    // Covers both the short ("apay balance ... at a.in") and full ("amazon pay balance ... at amazon.in") layouts.
+    private fun apayPayment(text: String): Boolean = Regex("""^payment of (?:rs\.?|inr|₹)\s*[\d,.]+ using (?:apay|amazon pay) balance is successful at (?:a|amazon)\.in\.""").containsMatchIn(text)
+
+    // Meal-benefit wallet spends (Pluxee variants + Sodexo). These carry an "Avl bal" tail, so they
+    // must count as a completed movement or the balance-only guard would drop them before templates.
+    private fun mealCardSpendFallback(text: String): Boolean =
+        Regex("""spent from pluxee\s+meal(?:\s+card)?\s+wallet""").containsMatchIn(text) ||
+            Regex("""was spent from meal card wallet linked to your pluxee card""").containsMatchIn(text) ||
+            Regex("""was spent from your sodexo meal card a/c""").containsMatchIn(text)
+
+    // Airtel prepaid recharge receipt carries a "Check your balance" tail; mark it a completed
+    // movement so the balance-only guard does not drop it before the (review-bound) template runs.
+    private fun airtelRecharge(text: String): Boolean = Regex("""recharge of (?:rs\.?|inr|₹)\s*[\d,.]+ is successful for your airtel mobile""").containsMatchIn(text)
+
+    private fun hasSecondaryConfirmation(text: String): Boolean = Regex("""^autopay \(e-mandate\) success!\s*\r?\nfor [^\r\n]+\r?\ntxn amt:\s*(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\ndt:\d{2}/\d{2}/\d{2,4}\s*\r?\nvia:hdfc bank cc\s+\d{4}\b""").containsMatchIn(text) || Regex("""^dear user,\s*challan payment of (?:rs\.?|inr|₹)\s*[\d,.]+ against pan/tan \S+ for assessment year \d{4} has been successfully paid\.""").containsMatchIn(text) || Regex("""^hi [^,\r\n]{1,80}, we have received a payment of (?:rs\.?|inr|₹)\s*[\d,.]+ for your airtel wi-fi id \S+""").containsMatchIn(text) || Regex("""^we confirm receipt of online payment made via bbpay for ([\d,.]+) against lpg refill booking no:\s*\d+\.your delivery authentication code is \d+\s*- hpcl\s*$""").containsMatchIn(text) || airtelRecharge(text)
 
     private fun hasCardFallback(text: String): Boolean = Regex("""^spent\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\naxis bank card no\.\s+[x*]+\d{4}\s*\r?\n\d{2}-\d{2}-\d{2,4}\s+\d{2}:\d{2}:\d{2}\s+ist\s*\r?\n[^\r\n]+\r?\navl limit:""").containsMatchIn(text) || Regex("""^txn\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\non hdfc bank card\s+\d{4}\s*\r?\nat [^\r\n]+\r?\nby upi\s+\d{12}\s*\r?\non\s+\d{2}-\d{2}\b""").containsMatchIn(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+spent using icici bank card\s+[x*]+\d{4}\s+on\s+\d{2}-[a-z]{3}-\d{2,4}\s+on\s+.+?\.\s*avl limit:""").containsMatchIn(text) || Regex("""^autopay \(e-mandate\) success!\s*\r?\nfor [^\r\n]+\r?\ntxn amt:\s*(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\ndt:\d{2}/\d{2}/\d{2,4}\s*\r?\nvia:hdfc bank cc\s+\d{4}\b""").containsMatchIn(text)
 
-    private fun hasDebitFallback(text: String): Boolean = hasSecondaryConfirmation(text) || hasCardFallback(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+dr\.\s+from\s+a/c\s+[x*]+\d{3,4}\s+and\s+cr\.\s+to\s+\S+\s+ref:\d{8,24}\.""").containsMatchIn(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+spent from pluxee\s+meal wallet,\s*card no\.(?:[x*]+\d{4})?\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+.+?\.\s*avl bal""").containsMatchIn(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+deducted from your pluxee card\s+[x*]+\d{4}\s+towards online convenience fee\.\s*pluxee\s*$""").containsMatchIn(text) || Regex("""^upi mandate:\s*\r?\nsent\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\nfrom hdfc bank a/c\s+[*x]*\d{4}\s*\r?\nto [^\r\n]+\r?\n\d{2}/\d{2}/\d{2,4}\s*\r?\nref\s+\d{8,24}\b""").containsMatchIn(text)
+    private fun hasDebitFallback(text: String): Boolean = hasSecondaryConfirmation(text) || apayPayment(text) || mealCardSpendFallback(text) || hasCardFallback(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+dr\.\s+from\s+a/c\s+[x*]+\d{3,4}\s+and\s+cr\.\s+to\s+\S+\s+ref:\d{8,24}\.""").containsMatchIn(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+spent from pluxee\s+meal wallet,\s*card no\.(?:[x*]+\d{4})?\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+.+?\.\s*avl bal""").containsMatchIn(text) || Regex("""^(?:rs\.?|inr|₹)\s*[\d,.]+\s+deducted from your pluxee card\s+[x*]+\d{4}\s+towards online convenience fee\.\s*pluxee\s*$""").containsMatchIn(text) || Regex("""^upi mandate:\s*\r?\nsent\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s*\r?\nfrom hdfc bank a/c\s+[*x]*\d{4}\s*\r?\nto [^\r\n]+\r?\n\d{2}/\d{2}/\d{2,4}\s*\r?\nref\s+\d{8,24}\b""").containsMatchIn(text)
 
     private fun hasCreditFallback(text: String): Boolean = Regex("""^received!\s*\r?\n(?:rs\.?|inr|₹)\s*[\d,.]+\s+in hdfc bank a/c\s+[x*]+\d{4}\s*\r?\non\s+\d{2}-\d{2}-\d{2,4}\s*\r?\nfor imps\s*-""").containsMatchIn(text) || Regex("""^update!\s*(?:rs\.?|inr|₹)\s*[\d,.]+\s+deposited in hdfc bank a/c\s+[x*]+\d{4}\s+on\s+\d{2}-[a-z]{3}-\d{2,4}\s+for neft\s+cr-""").containsMatchIn(text) || Regex("""^alert!\s*(?:rs\.?|inr|₹)\s*[\d,.]+\s+refunded by\s+.+\s+on\s+\d{2}/[a-z]{3}/\d{2,4}\s*& adjusted against hdfc bank credit card\s+\d{4}\b""").containsMatchIn(text) || Regex("""^(?:dear customer,\s*)?refund of\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s+for your\s+.{1,100}\border\s*#?\w+\s+is initiated\.""").containsMatchIn(text) || Regex("""^(?:payment of (?:rs\.?|inr|₹)\s*[\d,.]+ has been received (?:on|towards) your (?:icici|axis) bank credit card [x*]+\d{4}\b|dear hdfcbank cardmember,\s*payment of (?:rs\.?|inr|₹)\s*[\d,.]+ received towards your credit card ending with \d{4}\b|hdfc bank cardmember, online payment of (?:rs\.?|inr|₹)\s*[\d,.]+ vide ref# [^\r\n]{1,80} was credited to your card ending \d{4}\b)""").containsMatchIn(text)
 

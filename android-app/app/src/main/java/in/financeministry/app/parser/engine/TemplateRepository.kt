@@ -34,6 +34,17 @@ class InMemoryTemplateRepository : TemplateRepository {
                 channel = Channel.Card,
                 transactionType = TransactionType.MerchantPayment
             ),
+            // Axis multi-line card spend. Two layouts:
+            //   A: "Spent\n Card no. XXnnnn\n INR amt\n date time\n merchant\n Avl Lmt ..."
+            //   B: "Spent\n Axis Bank Card no. XXnnnn\n INR amt date time IST\n merchant\n Avl Lmt ..."
+            ParsingTemplate(
+                templateId = "axis_card_multiline",
+                regexPattern = """^spent\s*\r?\n\s*(?:axis bank )?card no\.\s+[x*]+(?<account>\d{4})\s*\r?\n\s*(?:inr|rs\.?|₹)\s*(?<amount>[\d,.]+)\s*(?:\r?\n\s*)?\d{2}-\d{2}-\d{2,4}\s+\d{2}:\d{2}:\d{2}(?:\s+ist)?\s*\r?\n\s*(?<merchant>[^\r\n]+?)\s*\r?\n\s*avl lmt\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Card,
+                transactionType = TransactionType.MerchantPayment
+            ),
             // MovementTemplates.hdfcCardUpi
             ParsingTemplate(
                 templateId = "hdfc_card_upi",
@@ -43,13 +54,31 @@ class InMemoryTemplateRepository : TemplateRepository {
                 channel = Channel.Card,
                 transactionType = TransactionType.MerchantPayment
             ),
-            // MovementTemplates.pluxeeSpend
+            // MovementTemplates.pluxeeSpend — covers "Meal wallet" and "Meal Card wallet" phrasings.
             ParsingTemplate(
                 templateId = "pluxee_spend",
-                regexPattern = """^$money\s+spent from pluxee\s+meal wallet,\s*card no\.(?:[x*]+(?<account>\d{4}))?\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+(?<merchant>.+?)\.\s*avl bal""",
+                regexPattern = """^$money\s+spent from pluxee\s+meal(?:\s+card)?\s+wallet,\s*card no\.\s*(?:[x*]+(?<account>\d{4}))?,?\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+(?<merchant>.+?)\s*\.\s*avl bal""",
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
                 channel = Channel.Wallet, // Pluxee is a meal-benefit wallet
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Pluxee alternate phrasing: "was spent from Meal Card Wallet linked to your Pluxee Card ..."
+            ParsingTemplate(
+                templateId = "pluxee_spend_linked",
+                regexPattern = """^$money\s+was spent from meal card wallet linked to your pluxee card\s*(?:[x*]+(?<account>\d{4}))?\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+(?<merchant>.+?)\.\s*txn no\.""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Wallet,
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Sodexo meal card spend (predecessor brand to Pluxee); no card number in this layout.
+            ParsingTemplate(
+                templateId = "sodexo_spend",
+                regexPattern = """^$money\s+was spent from your sodexo meal card a/c\s+on\s+\d{1,2}-\d{1,2}-\d{2,4}\s+\d{1,2}:\d{1,2}:\d{1,2}\s+at\s+(?<merchant>.+?)\.\s*txn no\.""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Wallet,
                 transactionType = TransactionType.MerchantPayment
             ),
             // MovementTemplates.pluxeeFee
@@ -153,14 +182,24 @@ class InMemoryTemplateRepository : TemplateRepository {
                 channel = Channel.CreditCard,
                 transactionType = TransactionType.CardRepayment
             ),
-            // Receipt: amazonReceipt
+            // Receipt: amazonReceipt — Amazon Pay wallet spend is a primary wallet debit, so auto-record.
             ParsingTemplate(
                 templateId = "amazon_receipt",
                 regexPattern = """^payment of $money using apay balance is successful at a\.in\.""",
                 direction = Direction.Debit,
                 status = TransactionStatus.Successful,
                 channel = Channel.Wallet,
-                transactionType = TransactionType.Unknown,
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Receipt: hpPayReceipt — HP PAY fuel purchase confirmation. Flagged for review because
+            // the bank card/UPI debit for the same purchase usually arrives as its own SMS.
+            ParsingTemplate(
+                templateId = "hp_pay_receipt",
+                regexPattern = """^transaction of $money for purchase of (?<merchant>[^\r\n]+?) is successful""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Unknown,
+                transactionType = TransactionType.MerchantPayment,
                 decision = ParseDecision.NeedsReview,
                 ruleId = "secondary_payment_confirmation"
             ),
@@ -194,6 +233,89 @@ class InMemoryTemplateRepository : TemplateRepository {
                 status = TransactionStatus.Successful,
                 channel = Channel.Unknown,
                 transactionType = TransactionType.Unknown,
+                decision = ParseDecision.NeedsReview,
+                ruleId = "secondary_payment_confirmation"
+            ),
+
+            // Amazon Pay wallet spend, full "Amazon.in" phrasing (primary wallet debit → auto-record).
+            ParsingTemplate(
+                templateId = "amazon_receipt_dotin",
+                regexPattern = """^payment of $money using amazon pay balance is successful at amazon\.in\.""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Wallet,
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Federal OneCard credit-card spend, phrasing A: "... You've spent Rs X at MERCHANT with your Federal One Credit Card ending in XXnnnn".
+            ParsingTemplate(
+                templateId = "onecard_spent_1",
+                regexPattern = """^[^\r\n]*?you've spent $money at (?<merchant>[^\r\n]+?) with your federal (?:bank\s+)?one credit card ending in [x*]+(?<account>\d{4})\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.CreditCard,
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Federal OneCard credit-card spend, phrasing B: "... Rs X spent at MERCHANT on your Federal Bank One Credit Card xxXXnnnn".
+            ParsingTemplate(
+                templateId = "onecard_spent_2",
+                regexPattern = """^[^\r\n]*?$money spent at (?<merchant>[^\r\n]+?) on your federal bank\s+one credit card\s+[x*]+(?<account>\d{4})\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.CreditCard,
+                transactionType = TransactionType.MerchantPayment
+            ),
+            // Mutual-fund purchase (KFIN "processed @ NAV"). Review: a separate bank debit usually arrives.
+            ParsingTemplate(
+                templateId = "mf_purchase_processed",
+                regexPattern = """^dear investor,\s*your purchase request dt \d{2}/\d{2}/\d{4} for $money in scheme (?<merchant>[^\r\n]+?) is processed\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Unknown,
+                transactionType = TransactionType.MerchantPayment,
+                decision = ParseDecision.NeedsReview,
+                ruleId = "secondary_payment_confirmation"
+            ),
+            // Mutual-fund new-purchase confirmation ("request for New Purchase of Rs X").
+            ParsingTemplate(
+                templateId = "mf_new_purchase",
+                regexPattern = """^[^\r\n]*?request for (?:new )?purchase of $money\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Unknown,
+                transactionType = TransactionType.MerchantPayment,
+                decision = ParseDecision.NeedsReview,
+                ruleId = "secondary_payment_confirmation"
+            ),
+            // BESCOM electricity bill paid via Airtel Payments Bank. Review (secondary to bank debit).
+            ParsingTemplate(
+                templateId = "bescom_payment",
+                regexPattern = """^[^\r\n]*?\(bescom\) payment for \d+ with $money on \d{1,2}-\d{1,2}-\d{4} is successful\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Unknown,
+                transactionType = TransactionType.MerchantPayment,
+                decision = ParseDecision.NeedsReview,
+                ruleId = "secondary_payment_confirmation"
+            ),
+            // bigbasket bbnow order payment receipt. Review (secondary to bank/UPI debit).
+            ParsingTemplate(
+                templateId = "bigbasket_payment",
+                regexPattern = """^[\s\S]*?your payment of $money is successful for your bbnow order\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Unknown,
+                transactionType = TransactionType.MerchantPayment,
+                decision = ParseDecision.NeedsReview,
+                ruleId = "secondary_payment_confirmation"
+            ),
+            // Airtel prepaid recharge receipt. Review (secondary to bank/UPI debit).
+            ParsingTemplate(
+                templateId = "airtel_recharge",
+                regexPattern = """^[^\r\n]*?recharge of $money is successful for your airtel mobile\b""",
+                direction = Direction.Debit,
+                status = TransactionStatus.Successful,
+                channel = Channel.Unknown,
+                transactionType = TransactionType.MerchantPayment,
                 decision = ParseDecision.NeedsReview,
                 ruleId = "secondary_payment_confirmation"
             ),

@@ -28,9 +28,11 @@ class ParserCoverageTest {
         val wallet = parse("Rs.42 spent from Pluxee Meal wallet, card no. on 01-01-2026 1:2:3 at TEST SHOP. Avl bal Rs.900.")
         assertEquals(ParseDecision.Record, wallet.decision)
         assertEquals(4200L, wallet.amountMinor)
+        // Amazon Pay wallet spend is a primary wallet debit and auto-records.
         val receipt = parse("Payment of Rs 42 using Apay balance is successful at A.in. Updated balance is Rs 900. If not u? call 1800000000 - SMS via Pine Labs")
-        assertEquals(ParseDecision.NeedsReview, receipt.decision)
+        assertEquals(ParseDecision.Record, receipt.decision)
         assertEquals(4200L, receipt.amountMinor)
+        assertEquals(Direction.Debit, receipt.direction)
     }
 
     @Test fun wallet_unpadded_calendar_components_do_not_drop_payments() {
@@ -112,7 +114,6 @@ class ParserCoverageTest {
             assertEquals("CardRepayment", result.transactionType.name)
         }
         listOf(
-            "Payment of Rs 42 using Apay balance is successful at A.in. Updated balance is Rs 900. If not u? call 1800000000 - SMS via Pine Labs",
             "Dear User, Challan payment of Rs. 42 against PAN/TAN XXXXX0000X for Assessment Year 2026 has been successfully paid. e-Filing, ITD.",
             "Hi TEST, we have received a payment of Rs. 42 for your Airtel Wi-Fi ID 0000_dsl. To download the payment receipt, click https://example.com",
             "We confirm receipt of online payment made via BBPAY for 42 against LPG Refill Booking No: 0000.Your Delivery Authentication Code is 0000 - HPCL"
@@ -136,5 +137,95 @@ class ParserCoverageTest {
         assertEquals(ParseDecision.Reject, parse("$card\nYour account was not debited").decision)
         assertEquals(ParseDecision.Reject, parse("$card\nOTP 123456").decision)
         assertEquals(ParseDecision.Reject, parse("Rs.42 deducted from your reward points offer").decision)
+    }
+
+    @Test fun pluxee_meal_card_wallet_phrasing_records_despite_avl_bal() {
+        val r = parse("Rs. 42.00 spent from Pluxee  Meal Card wallet, card no.xx0000 on 01-01-2026 12:00:00 at TEST SHOP . Avl bal Rs.900.00. Not you call 1800000000")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(4200L, r.amountMinor)
+        assertEquals(Direction.Debit, r.direction)
+        assertEquals(Channel.Wallet, r.channel)
+    }
+
+    @Test fun pluxee_linked_wallet_phrasing_records() {
+        val r = parse("Rs. 42.00 was spent from Meal Card Wallet linked to your Pluxee Card xx0000 on 01-01-2026 12:00:00 at TEST SHOP. Txn no. 000000000000. Avl bal is Rs. 900.00. Not you? Call 1800000000. Pluxee")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(4200L, r.amountMinor)
+        assertEquals(Channel.Wallet, r.channel)
+    }
+
+    @Test fun sodexo_meal_card_spend_records() {
+        val r = parse("Rs.42.00 was spent from your Sodexo Meal Card A/c  on 01-01-2022 12:00:00 at TEST SHOP. Txn no. 000000000000. Avl bal is Rs.900.00. Not you? Call 1800000000. Sodexo")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(4200L, r.amountMinor)
+        assertEquals(Direction.Debit, r.direction)
+        assertEquals(Channel.Wallet, r.channel)
+    }
+
+    @Test fun axis_multiline_spent_card_records() {
+        val r = parse("Spent \n Card no. XX0000 \n INR 42 \n 01-01-26 12:00:00 \n TEST SHOP \n Avl Lmt INR 900.00 \n SMS BLOCK 0000 to 910000000000, if not you - Axis Bank")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(4200L, r.amountMinor)
+        assertEquals(Direction.Debit, r.direction)
+        assertEquals(Channel.Card, r.channel)
+    }
+
+    @Test fun hp_pay_fuel_receipt_needs_review() {
+        val r = parse("Transaction of Rs.42.00 for purchase of Petrol is successful .  Regards, HP PAY Team")
+        assertEquals(ParseDecision.NeedsReview, r.decision)
+        assertEquals(4200L, r.amountMinor)
+        assertEquals(Direction.Debit, r.direction)
+    }
+
+    @Test fun icici_own_account_transfer_records_as_transfer_but_upi_recipient_stays_review() {
+        val transfer = parse("ICICI Bank Acct XX000 debited with Rs 42.00 on 01-Jan-26 & Acct XX111 credited.IMPS:000000000000. Call 18002662 for dispute or SMS BLOCK 000 to 9210000000")
+        assertEquals(ParseDecision.Record, transfer.decision)
+        assertEquals(Direction.Transfer, transfer.direction)
+        assertEquals(TransactionType.SelfTransfer, transfer.transactionType)
+        // A credit to a named UPI recipient is genuinely ambiguous (may be a real payment) → review.
+        val ambiguous = parse("ICICI Bank Acct XX000 debited for Rs 42.00 on 01-Jan-26; somepayee00 credited. UPI:000000000000. Call 18002662 for dispute. SMS BLOCK 000 to 9210000000.")
+        assertEquals(ParseDecision.NeedsReview, ambiguous.decision)
+    }
+
+    @Test fun onecard_inr_spend_records_but_foreign_currency_goes_to_review() {
+        val inr = parse("Fresh picks! You've spent Rs. 227.00 at Swiggy Limited with your Federal One Credit Card ending in XX0000. Reward points are now in your basket. To dispute this payment, click: m.1crd.in/OneCrd/shcut")
+        assertEquals(ParseDecision.Record, inr.decision)
+        assertEquals(22700L, inr.amountMinor)
+        assertEquals(Channel.CreditCard, inr.channel)
+        val inr2 = parse("Superb choice! Rs. 1,544.90 spent at Fpl Technologies Pvt on your Federal Bank  One Credit Card xxXX0000. Reward points added.")
+        assertEquals(ParseDecision.Record, inr2.decision)
+        assertEquals(154490L, inr2.amountMinor)
+        // Foreign-currency spend must NOT be recorded as INR.
+        val usd = parse("All set to go! You've spent USD 10.00 at Rtc, Las Vegas with your Federal One Credit Card ending in XX0000. Reward points are all packed.")
+        assertEquals(ParseDecision.NeedsReview, usd.decision)
+    }
+
+    @Test fun amazon_pay_full_phrasing_records() {
+        val r = parse("Payment of Rs 154.00 using Amazon Pay balance is successful at Amazon.in. Updated Balance: 0.00. For help/stmt: https://www.amazon.in/cstxn")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(15400L, r.amountMinor)
+        assertEquals(Channel.Wallet, r.channel)
+    }
+
+    @Test fun axis_multiline_inline_amount_variant_records() {
+        val r = parse("Spent \n Axis Bank Card no. XX0000 \n INR 233 09-01-24 21:06:52 IST \n BUNDL TECHN \n Avl Lmt INR 94243.42 \n SMS BLOCK 0000 to 910000000000, if not you.")
+        assertEquals(ParseDecision.Record, r.decision)
+        assertEquals(23300L, r.amountMinor)
+        assertEquals(Channel.Card, r.channel)
+    }
+
+    @Test fun mutual_fund_and_vendor_receipts_go_to_review() {
+        listOf(
+            "Dear Investor,Your purchase request Dt 06/02/2024 for Rs. 49997.50 in scheme quant Small Cap Fund - Regular Plan is processed @ NAV of Rs. 240.3974 and 207.979 units are allotted in Folio:XXXXXXXX332 . Rgds, quant Mutual Fund" to 4999750L,
+            "We confirm receipt of your request for New Purchase of Rs.50000.00 in Folio-XXXXXXX0000 under quant Small Cap Fund on 06/02/2024 vide 000000000." to 5000000L,
+            "Bangalore Electricity Supply Co. Ltd (BESCOM) payment for 0000000000 with Rs.298 on 08-02-2026 is successful, Txn ID -000000000000000. Not You?Call 180023400 - Airtel Payments Bank" to 29800L,
+            "Dear Bhaskar, \n  \n Your payment of Rs 108.0 is successful for your bbnow order. \n  \n Regards, \n Team bigbasket" to 10800L,
+            "1/2 Recharge of INR 349.00 is successful for your Airtel Mobile on 10-07-2026 05:43 PM, TransID: 0000000000." to 34900L,
+        ).forEach { (body, amt) ->
+            val r = parse(body)
+            assertEquals(body, ParseDecision.NeedsReview, r.decision)
+            assertEquals(body, amt, r.amountMinor)
+            assertEquals(body, Direction.Debit, r.direction)
+        }
     }
 }
