@@ -79,6 +79,76 @@ These APKs are deliberately debuggable. An authorized debugging connection can i
 
 The app does not keep raw SMS bodies or senders in its database. Manually entered notes and labels are stored locally and can contain whatever you type; avoid pasting sensitive messages or identifiers. See [Privacy](docs/PRIVACY.md).
 
+## How SMS parsing works
+
+Parsing is a deterministic, on-device **template + rule engine** (`TemplateEngineParser`). No
+network, no model inference. Every message becomes a `ParseAssessment` with one of three
+decisions — **Record** (auto-saved), **NeedsReview** (saved but flagged), or **Reject** (dropped).
+
+**Pipeline** (in order):
+
+1. **Normalize** — lowercase a copy and strip trailing security footers ("Not you? …").
+2. **Negative guards** — reject OTP/verification codes, negated or non-transaction text,
+   promotional/scheduled ("will be debited", offers), and balance/limit-only alerts.
+3. **Ambiguity guards** — send to Review when there are multiple candidate amounts, a
+   non-INR currency, or an unresolved mixed debit-and-credit message.
+4. **Strict templates** — the first match in `InMemoryTemplateRepository` (~30 bank/wallet
+   layouts) plus fallback templates wins. Each template fixes the direction, status, channel
+   and transaction type, and pulls named groups (`amount`, `merchant`, `account`).
+5. **Heuristic fallback** — for decisive movements that match no template, `ParserRules`
+   regexes infer direction/status/channel/type and extract a single unambiguous amount;
+   anything uncertain drops to Review.
+
+**Payment method and bank derivation:**
+
+- **Channel** (the payment method): `UPI, CreditCard, DebitCard, Wallet, NetBanking, ATM,
+  IMPS, NEFT, RTGS, BankTransfer, Card` (generic card when credit/debit is unstated),
+  `CashManual`. Credit vs debit card, wallets (Pluxee/Apay), net banking, and rail tags
+  (`InfoRTGS*`, `UPI:` in ICICI/PNB account statements) are derived from the text.
+- **Bank** — inferred from the SMS sender id, falling back to the body, via a shared
+  `BankRegistry`. Senders that only issue credit cards (e.g. SBI Cards) promote a generic
+  `Card` detection to `CreditCard`. The bank is stored per transaction.
+- **Instrument** — only a **masked last-4** (`••••1234`) is ever captured. Full numbers,
+  holder names, card networks and expiry are never parsed or stored.
+- Recognized transactions are conservatively matched to any payment source you registered
+  (`PaymentSourceMatcher`): missing evidence is allowed, contradictory evidence is not.
+
+**Spend vs income (for the Spend Tracker home):**
+
+- `spendByMethod` — **net spend per method type** = debits minus refund/reversal credits
+  (refunds are netted against spend, never counted as income).
+- `incomeByMethod` — genuine credits, excluding refunds/reversals.
+- Both exclude self-transfers, card repayments, reversed originals, and non-successful or
+  needs-review records, matching the ledger's monthly totals.
+
+Parser coverage is heuristic and not guaranteed; see the
+[remaining parser work](docs/ROADMAP.md#confirmed-open-parser-issues).
+
+### Testing the parser
+
+- **Unit tests** (JVM, synthetic inputs — `android-app/app/src/test`): parser classification
+  and bank derivation (`PaymentMethodDerivationTest`), format coverage (`ParserCoverageTest`,
+  `FinancialSmsParserTest`, `ResearchedFormatsTest`).
+  ```sh
+  cd android-app && ./gradlew testDebugUnitTest
+  ```
+- **Instrumented tests** (on a disposable emulator — `android-app/app/src/androidTest`):
+  per-method spend and refund netting (`SpendAggregationTest`), and an opt-in end-to-end
+  import→discovery run over a local SMS export (`PaymentMethodImportE2eTest`, skipped unless
+  the export is present).
+  ```sh
+  cd android-app && ./gradlew connectedDebugAndroidTest
+  ```
+- **Debug file import** — on many emulators, SMS injected via `adb` are flagged "restricted"
+  and hidden from a non-default SMS app, so the in-app import reads nothing. Debug builds add
+  **Settings → SMS and past messages → "Import from test file (debug)"**, which parses an
+  "SMS Exporter" text export through the real import pipeline. Push the file first:
+  ```sh
+  adb shell mkdir -p /sdcard/Android/data/in.financeministry.app/files
+  adb push sms-history.txt /sdcard/Android/data/in.financeministry.app/files/sms-history.txt
+  ```
+  Use invented messages only; never commit a real SMS export (it is git-ignored).
+
 ## Known limitations
 
 - English heuristic parsing, primarily INR; no measured production-accuracy guarantee.
