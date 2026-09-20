@@ -57,7 +57,8 @@ class ResearchedFormatsTest(private val label: String, private val body: String,
                 "Card issued" to "Your Kotak Credit Card ending 0000 has been issued. Limit INR 900",
                 "No merchant date" to "INR 42.50 spent on holidays. Available balance INR 900"
             )) reject(name, body)
-            rows += arrayOf("Two movements", "INR 42.50 spent on Kotak Credit Card x0000 on 01-01-26 at TEST SHOP. INR 70 debited from your account.", ParseDecision.NeedsReview, null, Direction.Debit)
+            // First match wins: the card spend is recorded and the trailing clause is ignored.
+            rows += arrayOf("Two movements", "INR 42.50 spent on Kotak Credit Card x0000 on 01-01-26 at TEST SHOP. INR 70 debited from your account.", ParseDecision.Record, 4250L, Direction.Debit)
             return rows
         }
     }

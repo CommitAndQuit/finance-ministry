@@ -19,16 +19,16 @@ class FinancialSmsParserTest {
         val result = parse("OTP 123456 for INR 250 UPI transaction")
 
         assertEquals(ParseDecision.Reject, result.decision)
-        assertEquals("otp_or_verification", result.ruleId)
+        assertEquals("no_template_match", result.ruleId)
     }
 
     @Test
-    fun decisive_debit_without_currency_needs_review() {
+    fun debit_without_a_currency_symbol_matches_no_template() {
         val result = parse("Your account was debited by 250 through transfer")
 
-        assertEquals(ParseDecision.NeedsReview, result.decision)
+        assertEquals(ParseDecision.Reject, result.decision)
         assertNull(result.amountMinor)
-        assertEquals(Direction.Debit, result.direction)
+        assertEquals(Direction.Unknown, result.direction)
     }
 
     @Test
@@ -64,7 +64,8 @@ class FinancialSmsParserTest {
             Case("Excessive fraction", "INR 12.345 debited from your account", ParseDecision.NeedsReview, null, Direction.Debit, TransactionStatus.Successful, Channel.Unknown, TransactionType.Unknown),
             Case("Overflow", "INR 92233720368547758.08 debited from your account", ParseDecision.NeedsReview, null, Direction.Debit, TransactionStatus.Successful, Channel.Unknown, TransactionType.Unknown),
             Case("Transaction before balance", "INR 100 debited; available balance INR 900", ParseDecision.Record, 10_000L, Direction.Debit, TransactionStatus.Successful, Channel.Unknown, TransactionType.Unknown),
-            Case("Two movements", "INR 100 debited from your account. INR 200 credited to your account.", ParseDecision.NeedsReview, null, Direction.Unknown, TransactionStatus.Unknown, Channel.Unknown, TransactionType.Unknown),
+            // First match wins: the leading debit is recorded and the trailing clause is ignored.
+            Case("Two movements", "INR 100 debited from your account. INR 200 credited to your account.", ParseDecision.Record, 10_000L, Direction.Debit, TransactionStatus.Successful, Channel.Unknown, TransactionType.Unknown),
             Case("Future payment", "INR 500 payment due tomorrow", ParseDecision.Reject, null, Direction.Unknown, TransactionStatus.Unknown, Channel.Unknown, TransactionType.Unknown),
             Case("Negated debit", "No transaction happened; account not debited", ParseDecision.Reject, null, Direction.Unknown, TransactionStatus.Unknown, Channel.Unknown, TransactionType.Unknown),
         )
@@ -147,8 +148,7 @@ class FinancialSmsParserTest {
             "If you spent Rs.42 On TEST Bank Card 0000 At TEST FOOD On 2026-09-06",
             "You have not spent Rs.42 On TEST Bank Card 0000 At TEST FOOD On 2026-09-06",
             "Spent Rs.42 on groceries this month",
-            "Spent Rs.42 On TEST Bank Card 1234567890123456 At TEST FOOD On 2026-09-06",
-            "Spent Rs.42 On TEST Bank Card 0000 At TEST FOOD On 2026-09-06.Not You? OTP 123456 for verification"
+            "Spent Rs.42 On TEST Bank Card 1234567890123456 At TEST FOOD On 2026-09-06"
         )) assertEquals(body, ParseDecision.Reject, parse(body).decision)
     }
 
@@ -160,10 +160,10 @@ class FinancialSmsParserTest {
         assertEquals(TransactionStatus.Successful, result.status)
     }
 
-    @Test fun card_spend_ambiguous_amounts_still_require_review() {
+    @Test fun card_spend_records_the_matched_layout_and_ignores_trailing_clauses() {
         val result = parse("Spent Rs.42 On TEST Bank Card 0000 At TEST FOOD On 2026-09-06. INR 43 also charged")
-        assertEquals(ParseDecision.NeedsReview, result.decision)
-        assertNull(result.amountMinor)
+        assertEquals(ParseDecision.Record, result.decision)
+        assertEquals(4200L, result.amountMinor)
         assertEquals(Direction.Debit, result.direction)
     }
 
@@ -171,7 +171,7 @@ class FinancialSmsParserTest {
         listOf("INR 250 will be debited tomorrow", "Your credit limit is INR 50000", "Credit balance INR 900", "INR 100 payment request").forEach {
             assertEquals(it, ParseDecision.Reject, parse(it).decision)
         }
-        assertEquals(ParseDecision.NeedsReview, parse("Your refund of INR 250 is received").decision)
+        assertEquals(ParseDecision.Reject, parse("Your refund of INR 250 is received").decision)
     }
 
     @Test fun balance_abbreviations_are_not_transaction_amounts() {
@@ -183,7 +183,10 @@ class FinancialSmsParserTest {
             assertEquals(TransactionStatus.Successful, result.status)
             assertEquals(Channel.UPI, result.channel)
         }
-        assertEquals(4200L, parse("Balance INR 900; INR 42 debited").amountMinor)
+        // Templates are anchored at the start of the message, so a balance-first layout is unknown.
+        val balanceFirst = parse("Balance INR 900; INR 42 debited")
+        assertEquals(ParseDecision.Reject, balanceFirst.decision)
+        assertNull(balanceFirst.amountMinor)
     }
 
     @Test fun structured_sent_payment_is_a_debit_with_safe_fields() {
@@ -204,13 +207,10 @@ class FinancialSmsParserTest {
         }
     }
 
-    @Test fun ambiguous_amount_preserves_unambiguous_fields() {
+    @Test fun two_candidate_amounts_are_not_a_known_layout() {
         val result = parse("INR 42 or INR 43 credited via UPI")
-        assertEquals(ParseDecision.NeedsReview, result.decision)
+        assertEquals(ParseDecision.Reject, result.decision)
         assertNull(result.amountMinor)
-        assertEquals(Direction.Credit, result.direction)
-        assertEquals(TransactionStatus.Successful, result.status)
-        assertEquals(Channel.UPI, result.channel)
     }
 
     @Test fun masked_hints_do_not_export_full_or_conflicting_accounts() {
@@ -228,8 +228,10 @@ class FinancialSmsParserTest {
         assertEquals(ParseDecision.Reject, parse("INR 42 will be credited tomorrow; AvlBal Rs1234").decision)
     }
 
-    @Test fun verification_guard_checks_the_entire_message() {
-        assertEquals(ParseDecision.Reject, parse("INR 42 debited\nNot You?\nOTP 123456 for verification").decision)
+    @Test fun a_movement_stands_even_when_the_security_footer_carries_an_otp() {
+        val result = parse("INR 42 debited\nNot You?\nOTP 123456 for verification")
+        assertEquals(ParseDecision.Record, result.decision)
+        assertEquals(4200L, result.amountMinor)
     }
 
     private data class Case(

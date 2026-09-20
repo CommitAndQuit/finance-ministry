@@ -81,23 +81,29 @@ The app does not keep raw SMS bodies or senders in its database. Manually entere
 
 ## How SMS parsing works
 
-Parsing is a deterministic, on-device **template + rule engine** (`TemplateEngineParser`). No
-network, no model inference. Every message becomes a `ParseAssessment` with one of three
+Parsing is a deterministic, on-device **template engine** (`TemplateEngineParser`). No network,
+no model inference, no heuristics. Every message becomes a `ParseAssessment` with one of three
 decisions — **Record** (auto-saved), **NeedsReview** (saved but flagged), or **Reject** (dropped).
 
 **Pipeline** (in order):
 
-1. **Normalize** — lowercase a copy and strip trailing security footers ("Not you? …").
-2. **Negative guards** — reject OTP/verification codes, negated or non-transaction text,
-   promotional/scheduled ("will be debited", offers), and balance/limit-only alerts.
-3. **Ambiguity guards** — send to Review when there are multiple candidate amounts, a
-   non-INR currency, or an unresolved mixed debit-and-credit message.
-4. **Strict templates** — the first match in `InMemoryTemplateRepository` (~30 bank/wallet
-   layouts) plus fallback templates wins. Each template fixes the direction, status, channel
-   and transaction type, and pulls named groups (`amount`, `merchant`, `account`).
-5. **Heuristic fallback** — for decisive movements that match no template, `ParserRules`
-   regexes infer direction/status/channel/type and extract a single unambiguous amount;
-   anything uncertain drops to Review.
+1. **Strip the security footer** — a trailing fraud-reporting block ("Not you? …") carries its
+   own codes and amounts, so templates never see it (`ParserRules`).
+2. **Match templates** — the ~90 layouts in `TemplateRepository` are tried in order and the
+   **first match wins and returns immediately**. Specific bank/card/wallet layouts come first,
+   generic movements last. Every pattern is compiled once, at class load.
+3. **Derive bank and card type** — the sender id (falling back to the body) sets the bank via
+   `BankRegistry`; a credit-card-only issuer promotes a generic `Card` to `CreditCard`.
+
+Each template fixes the direction, status, channel and transaction type, and pulls named groups
+(`amount`, `merchant`, `account`). A message no template recognizes is **rejected**
+(`no_template_match`) — coverage and accuracy grow only by adding templates, never by guessing.
+A recognized layout whose amount cannot be read safely (too many decimals, overflow) is kept as
+NeedsReview. Two templates flag non-INR spends for review instead of booking them as rupees.
+
+Because matching is anchored and first-match-wins, a prefix that changes the meaning ("OTP …",
+"If you …", "will be …") simply fails to match the layout, while text appended *after* a matched
+layout does not change the recorded transaction.
 
 **Payment method and bank derivation:**
 
@@ -121,7 +127,7 @@ decisions — **Record** (auto-saved), **NeedsReview** (saved but flagged), or *
 - Both exclude self-transfers, card repayments, reversed originals, and non-successful or
   needs-review records, matching the ledger's monthly totals.
 
-Parser coverage is heuristic and not guaranteed; see the
+Parser coverage is limited to the layouts that have templates and is not guaranteed; see the
 [remaining parser work](docs/ROADMAP.md#confirmed-open-parser-issues).
 
 ### Testing the parser

@@ -126,17 +126,20 @@ class ParserCoverageTest {
         }
     }
 
-    @Test fun new_templates_keep_otp_future_negation_and_multi_amount_guards() {
+    @Test fun anchored_layouts_reject_prefixes_that_change_the_meaning() {
         val card = "Spent INR 42\nAxis Bank Card no. XX0000\n01-01-26 12:00:00 IST\nTEST SHOP\nAvl Limit: INR 900"
+        // Templates match from the start of the message, so an OTP, condition or tense prefix
+        // no longer looks like the layout at all.
         listOf("OTP 123456 $card", "If you $card", "You have not $card", "Tomorrow $card").forEach {
             assertEquals(it, ParseDecision.Reject, parse(it).decision)
         }
-        assertEquals(ParseDecision.NeedsReview, parse("$card\nINR 50 also debited").decision)
-        // These still match the anchored layout: rejection must come from the guards.
-        assertEquals(ParseDecision.Reject, parse("$card\nAmount will be debited tomorrow").decision)
-        assertEquals(ParseDecision.Reject, parse("$card\nYour account was not debited").decision)
-        assertEquals(ParseDecision.Reject, parse("$card\nOTP 123456").decision)
         assertEquals(ParseDecision.Reject, parse("Rs.42 deducted from your reward points offer").decision)
+        // Text appended after a matched layout does not change the recorded transaction.
+        listOf("INR 50 also debited", "Amount will be debited tomorrow", "Your account was not debited", "OTP 123456").forEach {
+            val result = parse("$card\n$it")
+            assertEquals(it, ParseDecision.Record, result.decision)
+            assertEquals(it, 4200L, result.amountMinor)
+        }
     }
 
     @Test fun pluxee_meal_card_wallet_phrasing_records_despite_avl_bal() {
@@ -177,14 +180,16 @@ class ParserCoverageTest {
         assertEquals(Direction.Debit, r.direction)
     }
 
-    @Test fun icici_own_account_transfer_records_as_transfer_but_upi_recipient_stays_review() {
+    @Test fun icici_own_account_transfer_is_a_transfer_and_a_named_recipient_is_an_outgoing_payment() {
         val transfer = parse("ICICI Bank Acct XX000 debited with Rs 42.00 on 01-Jan-26 & Acct XX111 credited.IMPS:000000000000. Call 18002662 for dispute or SMS BLOCK 000 to 9210000000")
         assertEquals(ParseDecision.Record, transfer.decision)
         assertEquals(Direction.Transfer, transfer.direction)
         assertEquals(TransactionType.SelfTransfer, transfer.transactionType)
-        // A credit to a named UPI recipient is genuinely ambiguous (may be a real payment) → review.
-        val ambiguous = parse("ICICI Bank Acct XX000 debited for Rs 42.00 on 01-Jan-26; somepayee00 credited. UPI:000000000000. Call 18002662 for dispute. SMS BLOCK 000 to 9210000000.")
-        assertEquals(ParseDecision.NeedsReview, ambiguous.decision)
+        // A UPI payee handle carries digits; it is still the counterparty of one outgoing debit.
+        val payee = parse("ICICI Bank Acct XX000 debited for Rs 42.00 on 01-Jan-26; somepayee00 credited. UPI:000000000000. Call 18002662 for dispute. SMS BLOCK 000 to 9210000000.")
+        assertEquals(ParseDecision.Record, payee.decision)
+        assertEquals(Direction.Debit, payee.direction)
+        assertEquals("somepayee00", payee.counterpartyLabel)
     }
 
     @Test fun hsbc_used_at_credit_card_spend_records_despite_limit_and_due() {
