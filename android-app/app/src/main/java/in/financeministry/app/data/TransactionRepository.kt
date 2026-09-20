@@ -168,9 +168,10 @@ class TransactionRepository(private val context: Context, private val namespace:
         SpendOverview(monthStart, totalSpend, transactions, avgPerDay, topCategory, methods,
             debits.sortedByDescending { it.effectiveTimestamp }.take(100))
     }
-    /** All spend transactions for one payment-method type in a calendar month, newest first.
-     *  Uses the same spend eligibility as the home cards, filtered to the given channel. */
-    suspend fun methodTransactions(channel: String, month: LocalDate = LocalDate.now().withDayOfMonth(1)): List<TransactionEntity> = locked {
+    /** All spend transactions for one payment INSTRUMENT (channel + bank + masked last-4) in a
+     *  calendar month, newest first. Uses the same spend eligibility as the home cards. */
+    suspend fun methodTransactions(channel: String, bankName: String?, maskedAccountHint: String?,
+        month: LocalDate = LocalDate.now().withDayOfMonth(1)): List<TransactionEntity> = locked {
         if (database == null && !context.getDatabasePath(dbName).exists()) return@locked emptyList()
         val zone = ZoneId.systemDefault()
         val m = month.withDayOfMonth(1)
@@ -179,7 +180,8 @@ class TransactionRepository(private val context: Context, private val namespace:
         val dao = db().transactions()
         val reversedOriginals = dao.reversedOriginals().toSet()
         dao.between(start, end).filter { row ->
-            row.channel == channel && row.id !in reversedOriginals && row.direction == Direction.Debit.name &&
+            row.channel == channel && row.bankName == bankName && row.maskedAccountHint == maskedAccountHint &&
+                row.id !in reversedOriginals && row.direction == Direction.Debit.name &&
                 row.status == TransactionStatus.Successful.name && row.reviewState != ReviewState.NeedsReview.name &&
                 row.transactionType !in listOf(TransactionType.SelfTransfer.name, TransactionType.CardRepayment.name) &&
                 row.ownership != SpendingOwnership.SelfTransfer.name

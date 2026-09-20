@@ -67,6 +67,8 @@ data class CategoryBalance(val category: String, val balanceMinor: Long)
 /** Net spend for one payment-method type: debits minus refunds/reversals credited back. */
 data class MethodSpend(
     val channel: String,
+    val bankName: String?,
+    val maskedAccountHint: String?,
     val grossSpendMinor: Long,
     val refundMinor: Long,
     val netSpendMinor: Long,
@@ -132,11 +134,12 @@ interface TransactionDao {
     @Query("SELECT channel AS channel, bankName AS bankName, maskedAccountHint AS maskedAccountHint, COUNT(*) AS count, MIN(effectiveTimestamp) AS firstSeen, MAX(effectiveTimestamp) AS lastSeen, COALESCE(SUM(CASE WHEN direction = 'Debit' THEN amountMinor ELSE 0 END), 0) AS outMinor, COALESCE(SUM(CASE WHEN direction = 'Credit' THEN amountMinor ELSE 0 END), 0) AS inMinor FROM transactions WHERE status = 'Successful' AND reviewState != 'NeedsReview' AND channel != 'Unknown' AND effectiveTimestamp >= :start AND effectiveTimestamp < :end GROUP BY channel, bankName, maskedAccountHint ORDER BY count DESC, lastSeen DESC")
     fun discoveredMethods(start: Long, end: Long): List<DiscoveredMethod>
 
-    // Net spend per payment-method type: debits, minus refund/reversal credits, netted per channel.
-    // Mirrors the ledger's spend eligibility (excludes self-transfers, card repayments, non-successful,
-    // needs-review, and originals that were reversed). Reversal credits are status='Reversed' so they
-    // fall out of the 'Successful' filter, leaving successful refunds as the amount netted back.
-    @Query("SELECT channel AS channel, " +
+    // Net spend per payment INSTRUMENT: debits minus refund/reversal credits, netted per distinct
+    // (channel, bank, masked last-4) so each physical card/account gets its own row. Mirrors the
+    // ledger's spend eligibility (excludes self-transfers, card repayments, non-successful, needs-review,
+    // and originals that were reversed). Reversal credits are status='Reversed' so they fall out of the
+    // 'Successful' filter, leaving successful refunds as the amount netted back.
+    @Query("SELECT channel AS channel, bankName AS bankName, maskedAccountHint AS maskedAccountHint, " +
         "COALESCE(SUM(CASE WHEN direction = 'Debit' THEN amountMinor ELSE 0 END), 0) AS grossSpendMinor, " +
         "COALESCE(SUM(CASE WHEN direction = 'Credit' THEN amountMinor ELSE 0 END), 0) AS refundMinor, " +
         "COALESCE(SUM(CASE WHEN direction = 'Debit' THEN amountMinor ELSE -amountMinor END), 0) AS netSpendMinor, " +
@@ -146,7 +149,7 @@ interface TransactionDao {
         "AND channel != 'Unknown' AND effectiveTimestamp >= :start AND effectiveTimestamp < :end " +
         "AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview') " +
         "AND (direction = 'Debit' OR (direction = 'Credit' AND transactionType IN ('Refund', 'Reversal'))) " +
-        "GROUP BY channel ORDER BY netSpendMinor DESC")
+        "GROUP BY channel, bankName, maskedAccountHint ORDER BY netSpendMinor DESC")
     fun spendByMethod(start: Long, end: Long): List<MethodSpend>
 
     // Genuine income per payment-method type: successful credits, excluding refunds/reversals (those

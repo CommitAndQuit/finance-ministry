@@ -46,8 +46,8 @@ class MainActivity : ComponentActivity() {
                 val repository = (application as FinanceMinistryApp).container.repository
                 var showLedger by remember { mutableStateOf(false) }
                 var openSettings by remember { mutableStateOf(false) }
-                // Payment-method detail page (channel, month), reached by tapping a home card.
-                var methodDetail by remember { mutableStateOf<Pair<String, String>?>(null) }
+                // Payment-method detail page (one instrument), reached by tapping a home card.
+                var methodDetail by remember { mutableStateOf<MethodRef?>(null) }
                 // Styled transaction detail page (transaction id), reached by tapping a transaction row.
                 var detailTxn by remember { mutableStateOf<String?>(null) }
                 // Home UI state hoisted above AnimatedContent so it survives navigating into the
@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
                 val screenState: ScreenState = when {
                     showLedger -> ScreenState.Ledger
                     detailTxn != null -> ScreenState.Detail(detailTxn!!)
-                    methodDetail != null -> ScreenState.Method(methodDetail!!.first, methodDetail!!.second)
+                    methodDetail != null -> ScreenState.Method(methodDetail!!)
                     else -> ScreenState.Home
                 }
                 SharedTransitionLayout {
@@ -97,7 +97,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 is ScreenState.Method -> {
-                                    `in`.financeministry.app.feature.MethodDetailScreen(repository, s.channel, s.month,
+                                    `in`.financeministry.app.feature.MethodDetailScreen(repository,
+                                        s.ref.channel, s.ref.bankName, s.ref.maskedAccountHint, s.ref.month,
                                         onBack = { methodDetail = null },
                                         onOpenTransaction = { detailTxn = it },
                                         sharedScope = this@SharedTransitionLayout, animatedScope = this@AnimatedContent)
@@ -114,7 +115,7 @@ class MainActivity : ComponentActivity() {
                                         timeFilter = homeTimeFilter, onTimeFilter = { homeTimeFilter = it },
                                         onOpenTransaction = { detailTxn = it },
                                         onOpenSettings = { openSettings = true; showLedger = true },
-                                        onOpenMethod = { channel, month -> methodDetail = channel to month },
+                                        onOpenMethod = { channel, bank, last4, month -> methodDetail = MethodRef(channel, bank, last4, month) },
                                         sharedScope = this@SharedTransitionLayout, animatedScope = this@AnimatedContent,
                                         carouselState = carouselState)
                                 }
@@ -139,10 +140,13 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Top-level navigation states. Method carries its data so outgoing content survives the transition. */
+/** Identifies one payment instrument (channel + bank + masked last-4) for a given month. */
+data class MethodRef(val channel: String, val bankName: String?, val maskedAccountHint: String?, val month: String)
+
 private sealed interface ScreenState {
     data object Home : ScreenState
     data object Ledger : ScreenState
-    data class Method(val channel: String, val month: String) : ScreenState
+    data class Method(val ref: MethodRef) : ScreenState
     data class Detail(val id: String) : ScreenState
 }
 

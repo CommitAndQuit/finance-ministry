@@ -35,6 +35,8 @@ import java.time.YearMonth
 fun MethodDetailScreen(
     repository: TransactionRepository,
     channel: String,
+    bankName: String?,
+    maskedAccountHint: String?,
     month: String,
     onBack: () -> Unit,
     onOpenTransaction: (String) -> Unit,
@@ -43,10 +45,10 @@ fun MethodDetailScreen(
 ) {
     val revision by repository.revision.collectAsState()
     val eraseGen by repository.eraseGeneration.collectAsState()
-    var rows by remember(channel, month) { mutableStateOf<List<TransactionEntity>?>(null) }
+    var rows by remember(channel, bankName, maskedAccountHint, month) { mutableStateOf<List<TransactionEntity>?>(null) }
 
-    LaunchedEffect(channel, month, revision, eraseGen) {
-        rows = runCatching { repository.methodTransactions(channel, YearMonth.parse(month).atDay(1)) }.getOrNull()
+    LaunchedEffect(channel, bankName, maskedAccountHint, month, revision, eraseGen) {
+        rows = runCatching { repository.methodTransactions(channel, bankName, maskedAccountHint, YearMonth.parse(month).atDay(1)) }.getOrNull()
     }
 
     BackHandler(enabled = true) { onBack() }
@@ -61,7 +63,7 @@ fun MethodDetailScreen(
     // appears to expand to fill the screen.
     val sharedMod = if (sharedScope != null && animatedScope != null) {
         with(sharedScope) {
-            Modifier.sharedBounds(rememberSharedContentState(key = methodShareKey(channel)), animatedVisibilityScope = animatedScope)
+            Modifier.sharedBounds(rememberSharedContentState(key = methodShareKey(channel, bankName, maskedAccountHint)), animatedVisibilityScope = animatedScope)
         }
     } else Modifier
 
@@ -74,7 +76,10 @@ fun MethodDetailScreen(
             ) {
                 Text("←", fontSize = 26.sp, color = v.onColor,
                     modifier = Modifier.clickableMenu(onBack).padding(8.dp))
-                Text(v.label, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = v.onColor)
+                Column {
+                    Text(v.label, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = v.onColor)
+                    Text(instrumentLabel(bankName, maskedAccountHint), fontSize = 13.sp, color = v.onColor.copy(alpha = 0.85f))
+                }
             }
             // Month summary.
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {

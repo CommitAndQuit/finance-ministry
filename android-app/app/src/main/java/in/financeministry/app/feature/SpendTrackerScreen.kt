@@ -53,8 +53,14 @@ import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 
-/** Shared-element key so a tapped method card morphs into the detail screen's background. */
-internal fun methodShareKey(channel: String): String = "method-bg-$channel"
+/** Shared-element key so a tapped method card morphs into the detail screen's background.
+ *  Keyed per instrument (channel + bank + masked last-4) so each card has its own morph. */
+internal fun methodShareKey(channel: String, bank: String?, last4: String?): String =
+    "method-bg-$channel-${bank.orEmpty()}-${last4.orEmpty()}"
+
+/** Bank + masked last-4 label that distinguishes one physical card/account from another. */
+internal fun instrumentLabel(bank: String?, last4: String?): String =
+    listOfNotNull(bank, last4).joinToString(" ").ifBlank { "Unidentified" }
 
 internal data class MethodVisual(val label: String, val color: Color, val onColor: Color, val logo: String)
 
@@ -98,7 +104,7 @@ fun SpendTrackerScreen(
     onTimeFilter: (String) -> Unit,
     onOpenTransaction: (String) -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenMethod: (channel: String, month: String) -> Unit = { _, _ -> },
+    onOpenMethod: (channel: String, bank: String?, last4: String?, month: String) -> Unit = { _, _, _, _ -> },
     sharedScope: SharedTransitionScope? = null,
     animatedScope: AnimatedVisibilityScope? = null,
     carouselState: androidx.compose.foundation.lazy.LazyListState? = null,
@@ -112,10 +118,11 @@ fun SpendTrackerScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             item { Header(onOpenSettings) }
-            item { MethodCarousel(overview?.methods.orEmpty(), onOpenSettings, sharedScope, animatedScope, carouselState ?: rememberLazyListState()) { channel -> onOpenMethod(channel, month) } }
+            item { MethodCarousel(overview?.methods.orEmpty(), onOpenSettings, sharedScope, animatedScope, carouselState ?: rememberLazyListState()) { m -> onOpenMethod(m.channel, m.bankName, m.maskedAccountHint, month) } }
             item { MonthSpendPager(repository, month, onMonthChange) }
-            // White sheet: at least a full screen tall, so it takes over the viewport once scrolled up.
-            item { TransactionSheet(Modifier.fillParentMaxHeight(), overview, timeFilter, onTimeFilter, onOpenTransaction) }
+            // White sheet sized to its content (min one screen tall) so the whole list scrolls with
+            // the page instead of being clipped to a single fixed-height, non-scrolling panel.
+            item { TransactionSheet(Modifier.heightIn(min = LocalConfiguration.current.screenHeightDp.dp), overview, timeFilter, onTimeFilter, onOpenTransaction) }
         }
     }
 }
@@ -141,7 +148,7 @@ private fun Header(onOpenSettings: () -> Unit) {
 private fun MethodCarousel(
     methods: List<MethodSpend>, onAddPaymentMethod: () -> Unit,
     sharedScope: SharedTransitionScope?, animatedScope: AnimatedVisibilityScope?,
-    listState: androidx.compose.foundation.lazy.LazyListState, onOpenMethod: (String) -> Unit
+    listState: androidx.compose.foundation.lazy.LazyListState, onOpenMethod: (MethodSpend) -> Unit
 ) {
     val brand = LocalBrand.current
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
@@ -175,22 +182,24 @@ private fun MethodCarousel(
 @Composable
 private fun MethodCard(
     method: MethodSpend, width: Dp, shareOfTotal: Float,
-    sharedScope: SharedTransitionScope?, animatedScope: AnimatedVisibilityScope?, onOpenMethod: (String) -> Unit
+    sharedScope: SharedTransitionScope?, animatedScope: AnimatedVisibilityScope?, onOpenMethod: (MethodSpend) -> Unit
 ) {
     val brand = LocalBrand.current
     val v = visualFor(method.channel, brand)
     val sharedMod = if (sharedScope != null && animatedScope != null) {
         with(sharedScope) {
-            Modifier.sharedBounds(rememberSharedContentState(key = methodShareKey(method.channel)), animatedVisibilityScope = animatedScope)
+            Modifier.sharedBounds(rememberSharedContentState(key = methodShareKey(method.channel, method.bankName, method.maskedAccountHint)), animatedVisibilityScope = animatedScope)
         }
     } else Modifier
     Box(Modifier.width(width).height(200.dp).then(sharedMod).clip(RoundedCornerShape(24.dp)).background(v.color)
-        .clickableMenu { onOpenMethod(method.channel) }.padding(20.dp)) {
+        .clickableMenu { onOpenMethod(method) }.padding(20.dp)) {
         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
                 Text(v.logo, fontSize = 18.sp, fontWeight = FontWeight.Black, color = v.onColor)
                 Column {
                     Text(v.label, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = v.onColor)
+                    Text(instrumentLabel(method.bankName, method.maskedAccountHint),
+                        fontSize = 13.sp, fontWeight = FontWeight.Medium, color = v.onColor.copy(alpha = 0.85f), maxLines = 1)
                     Text("${method.spendCount} transaction${if (method.spendCount == 1) "" else "s"}",
                         fontSize = 12.sp, color = v.onColor.copy(alpha = 0.7f))
                     if (method.refundMinor > 0) Text("Refunds ${money(method.refundMinor)} netted",
@@ -255,7 +264,8 @@ private fun MonthTotalCard(repository: TransactionRepository, ym: YearMonth) {
     val brand = LocalBrand.current
     var total by remember(ym) { mutableStateOf<Long?>(null) }
     LaunchedEffect(ym) { total = runCatching { repository.monthSpendTotal(ym.atDay(1)) }.getOrNull() }
-    val label = "${ym.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${ym.year}"
+    // Read the locale from the configuration so the label recomposes on a locale change.
+    val label = "${ym.month.getDisplayName(TextStyle.FULL, LocalConfiguration.current.locales[0])} ${ym.year}"
     val glassShape = RoundedCornerShape(24.dp)
     Column(
         Modifier.fillMaxWidth().clip(glassShape)
