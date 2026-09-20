@@ -139,6 +139,21 @@ Parser coverage is heuristic and not guaranteed; see the
   ```sh
   cd android-app && ./gradlew connectedDebugAndroidTest
   ```
+- **Local export harnesses** (opt-in, skipped when no export is present; they print results
+  instead of asserting, so they are development tools rather than regression tests):
+  - `ExportAuditHarness` (JVM) runs the real engine over an "SMS Exporter" text export and prints
+    one tab-separated row per message (decision, amount, direction, channel, bank, rule id).
+  - `ParserBenchmark` (JVM) and `ParserBenchmarkDeviceTest` (instrumented) measure parse cost per
+    SMS and compare it against running every template against every message.
+
+  Both JVM harnesses read `sms-history-sep2026.txt` at the repository root; the device benchmark
+  reads the pushed `sms-history.txt` described below. Use `-i` to see their output, since Gradle
+  hides test stdout by default:
+  ```sh
+  cd android-app && ./gradlew testDebugUnitTest --tests '*ParserBenchmark' --tests '*ExportAuditHarness' -i
+  adb shell am instrument -w -e class in.financeministry.app.ParserBenchmarkDeviceTest \
+    in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner
+  ```
 - **Debug file import** — on many emulators, SMS injected via `adb` are flagged "restricted"
   and hidden from a non-default SMS app, so the in-app import reads nothing. Debug builds add
   **Settings → SMS and past messages → "Import from test file (debug)"**, which parses an
