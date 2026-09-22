@@ -1,4 +1,4 @@
-# Finance Ministry
+# TxnSense
 
 An Android expense tracker that records transactions from incoming SMS and lets you add or correct them yourself.
 
@@ -41,9 +41,9 @@ manually entered copies of the same payment may still need review.
 
 Requires **Android 8.0 (API 26) or newer**. Current runtime verification is on a Pixel 9a Android 16 emulator; physical-device and OEM testing is still pending.
 
-1. Open [Releases](https://github.com/hk121902-stack/finance-ministry/releases) and choose the newest **pre-release**. Download its `finance-ministry-*-debug.apk`, not the source-code ZIP.
+1. Open [Releases](https://github.com/hk121902-stack/finance-ministry/releases) and choose the newest **pre-release**. Download its `txnsense-*-debug.apk`, not the source-code ZIP.
 2. Install the APK on a test device. Android may ask you to allow installations from the browser or Files app you used to download it. This is a one-time installer permission for that app; download only from this repository's Releases page. Do not disable Play Protect globally.
-3. Open Finance Ministry. **+ Add transaction** works immediately without SMS or notification permissions.
+3. Open TxnSense. **+ Add transaction** works immediately without SMS or notification permissions.
 4. Open **Settings → Enable SMS capture**, read the disclosure, and continue through Android's SMS permission prompt. **Pause SMS capture** means capture is currently enabled.
 5. In **Settings**, enable **Recording notifications** and allow the separate Android prompt. If blocked, use **Allow Android notifications** or **Open notification settings**. The in-app switch and Android permission are independent; both must be on for notifications.
 6. New eligible messages are recorded automatically. Open a row or its notification to review or correct it.
@@ -157,16 +157,16 @@ Parser coverage is limited to the layouts that have templates and is not guarant
   hides test stdout by default:
   ```sh
   cd android-app && ./gradlew testDebugUnitTest --tests '*ParserBenchmark' --tests '*ExportAuditHarness' -i
-  adb shell am instrument -w -e class in.financeministry.app.ParserBenchmarkDeviceTest \
-    in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner
+  adb shell am instrument -w -e class in.txnsense.app.ParserBenchmarkDeviceTest \
+    in.txnsense.app.test/androidx.test.runner.AndroidJUnitRunner
   ```
 - **Debug file import** — on many emulators, SMS injected via `adb` are flagged "restricted"
   and hidden from a non-default SMS app, so the in-app import reads nothing. Debug builds add
   **Settings → SMS and past messages → "Import from test file (debug)"**, which parses an
   "SMS Exporter" text export through the real import pipeline. Push the file first:
   ```sh
-  adb shell mkdir -p /sdcard/Android/data/in.financeministry.app/files
-  adb push sms-history.txt /sdcard/Android/data/in.financeministry.app/files/sms-history.txt
+  adb shell mkdir -p /sdcard/Android/data/in.txnsense.app/files
+  adb push sms-history.txt /sdcard/Android/data/in.txnsense.app/files/sms-history.txt
   ```
   Use invented messages only; never commit a real SMS export (it is git-ignored).
 
@@ -221,4 +221,4 @@ Releases use tags such as `v0.1.0-alpha.1` and an accompanying [changelog](CHANG
 
 ## License
 
-Finance Ministry's original source code is available under the [MIT License](LICENSE). Bundled dependencies retain their own licenses; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).
+TxnSense's original source code is available under the [MIT License](LICENSE). Bundled dependencies retain their own licenses; see [third-party notices](docs/THIRD_PARTY_NOTICES.md).

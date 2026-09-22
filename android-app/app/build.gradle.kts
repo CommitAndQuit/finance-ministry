@@ -15,11 +15,11 @@ val requireAlphaSigning = providers.environmentVariable("FM_REQUIRE_ALPHA_SIGNIN
 check(!requireAlphaSigning || !alphaKeystore.isNullOrBlank()) { "Official alpha builds require the persistent signing keystore." }
 
 android {
-    namespace = "in.financeministry.app"
+    namespace = "in.txnsense.app"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "in.financeministry.app"
+        applicationId = "in.txnsense.app"
         minSdk = 26
         targetSdk = 37
         versionCode = appVersion.getProperty("versionCode").toInt()

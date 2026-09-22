@@ -1,6 +1,6 @@
 # Third-party notices
 
-The MIT license covers Finance Ministry's original source. Dependencies retain their
+The MIT license covers TxnSense's original source. Dependencies retain their
 own copyrights and licenses. This file and the license texts in
 `android-app/app/src/main/assets/licenses/` are included with downloadable APKs.
 The texts are also embedded in the APK's assets.

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "finance-ministry"
+rootProject.name = "txnsense"
 include(":app")

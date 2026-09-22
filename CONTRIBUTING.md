@@ -1,6 +1,6 @@
 # Contributing
 
-Finance Ministry is open source, with maintainer-led development during its early alpha.
+TxnSense is open source, with maintainer-led development during its early alpha.
 
 ## What is welcome now
 

@@ -1,6 +1,6 @@
 # Privacy and data handling
 
-Finance Ministry processes incoming SMS on the Android device to create a local
+TxnSense processes incoming SMS on the Android device to create a local
 transaction ledger. There is no sign-up or app backend.
 
 ## Permissions

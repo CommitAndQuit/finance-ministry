@@ -9,11 +9,11 @@
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_finance_ministry"
-        android:roundIcon="@drawable/ic_finance_ministry"
-        android:label="Finance Ministry"
-        android:theme="@style/Theme.FinanceMinistry"
-        android:name=".FinanceMinistryApp">
+        android:icon="@drawable/ic_txnsense"
+        android:roundIcon="@drawable/ic_txnsense"
+        android:label="TxnSense"
+        android:theme="@style/Theme.TxnSense"
+        android:name=".TxnSenseApp">
         <activity
             android:name=".MainActivity"
             android:launchMode="singleTop"

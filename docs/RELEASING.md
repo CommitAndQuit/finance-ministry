@@ -61,9 +61,9 @@ Standard tests: `./gradlew connectedDebugAndroidTest`. One host-driven SMS test 
 intentionally skipped in that command because it needs a coordinated emulator SMS.
 
 To run that test, target the emulator and add
-`-Pandroid.testInstrumentationRunnerArguments.class=in.financeministry.app.SmsBroadcastE2eTest`
+`-Pandroid.testInstrumentationRunnerArguments.class=in.txnsense.app.SmsBroadcastE2eTest`
 and `-Pandroid.testInstrumentationRunnerArguments.runSmsE2e=true`. While it runs,
-wait until `adb -s emulator-5554 shell run-as in.financeministry.app test -f files/synthetic_sms_test_ready`
+wait until `adb -s emulator-5554 shell run-as in.txnsense.app test -f files/synthetic_sms_test_ready`
 returns exit code 0, then send exactly one synthetic message:
 
 ```sh
@@ -85,9 +85,9 @@ developer-signed build over an official alpha.
 Install the matching test APK with `adb -s SERIAL install -t TEST_APK`, then run:
 
 ```sh
-adb -s SERIAL shell am instrument -w -e class in.financeministry.app.OfficialUpgradeTest -e upgradeStage seed in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner
+adb -s SERIAL shell am instrument -w -e class in.txnsense.app.OfficialUpgradeTest -e upgradeStage seed in.txnsense.app.test/androidx.test.runner.AndroidJUnitRunner
 adb -s SERIAL install -r CANDIDATE_APK
-adb -s SERIAL shell am instrument -w -e class in.financeministry.app.OfficialUpgradeTest -e upgradeStage verify in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner
+adb -s SERIAL shell am instrument -w -e class in.txnsense.app.OfficialUpgradeTest -e upgradeStage verify in.txnsense.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 The seed stage creates and edits one synthetic record using the previous app's API.
@@ -135,7 +135,7 @@ root cause. Neither run establishes real-phone performance or the PRD latency ga
 
 For ordinary process recovery, run `ProcessRestartSmsTest` with `restartStage=prepare`
 after the signed-upgrade seed exists. Launch the app, send it Home, then use
-`adb -s SERIAL shell am kill in.financeministry.app`. Confirm `pidof` is empty before
+`adb -s SERIAL shell am kill in.txnsense.app`. Confirm `pidof` is empty before
 sending `INR 701.23 credited via UPI; AvlBal: Rs9999.99` through the emulator console.
 Observe the restarted process and notification before starting instrumentation again.
 Run the same test with `restartStage=verify` and require `OK (1 test)`. It checks the
