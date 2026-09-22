@@ -180,6 +180,31 @@ class ParserCoverageTest {
         assertEquals(Direction.Debit, r.direction)
     }
 
+    @Test fun upi_payments_to_a_card_bill_payee_are_repayments_not_spends() {
+        // Both layouts pay a credit-card bill through CRED: the card spends are already recorded,
+        // so these must classify as CardRepayment, which the spend and income totals exclude.
+        listOf(
+            "A/c X0000 debited INR 42.00 Dt 01-01-26 09:21:38 to CRED Club thru UPI:000000000000.Bal INR 900.00 Not u?Fwd this SMS to 9000000000 to block UPI.-PNB",
+            "A/c X0000 debited INR 42.00 Dt 01-01-26 09:21:38 to CRED thru UPI:000000000000.Bal INR 900.00-PNB",
+            "ICICI Bank Acct XX000 debited for Rs 42.00 on 01-Jan-26; CRED Club credited. UPI:000000000000. Call 18002662 for dispute."
+        ).forEach {
+            val result = parse(it)
+            assertEquals(it, ParseDecision.Record, result.decision)
+            assertEquals(it, 4200L, result.amountMinor)
+            assertEquals(it, Direction.Debit, result.direction)
+            assertEquals(it, TransactionType.CardRepayment, result.transactionType)
+        }
+        // An ordinary payee on the same layouts is still a normal outgoing payment.
+        listOf(
+            "A/c X0000 debited INR 42.00 Dt 01-01-26 09:21:38 to TEST SHOP thru UPI:000000000000.Bal INR 900.00-PNB",
+            "ICICI Bank Acct XX000 debited for Rs 42.00 on 01-Jan-26; TEST PERSON credited. UPI:000000000000."
+        ).forEach {
+            val result = parse(it)
+            assertEquals(it, ParseDecision.Record, result.decision)
+            assertNotEquals(it, TransactionType.CardRepayment, result.transactionType)
+        }
+    }
+
     @Test fun icici_own_account_transfer_is_a_transfer_and_a_named_recipient_is_an_outgoing_payment() {
         val transfer = parse("ICICI Bank Acct XX000 debited with Rs 42.00 on 01-Jan-26 & Acct XX111 credited.IMPS:000000000000. Call 18002662 for dispute or SMS BLOCK 000 to 9210000000")
         assertEquals(ParseDecision.Record, transfer.decision)

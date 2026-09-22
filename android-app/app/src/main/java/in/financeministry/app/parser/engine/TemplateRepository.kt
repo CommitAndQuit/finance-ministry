@@ -29,6 +29,26 @@ private const val TAIL_ON_AT = """\s+on\s+$DATE\s+at\s+(?<merchant>[^\r\n]{1,80}
 private const val TAIL_AT_SIGN = """\s+@(?<merchant>[^\r\n]{1,80}?)\s+$DATE"""
 
 /**
+ * UPI payees that settle a credit-card bill. A debit to one of them repays card spends the ledger
+ * has already recorded, so it is a `CardRepayment` and must never be counted as a spend again.
+ */
+private const val CARD_BILL_PAYEE = """cred(?:\s+club)?"""
+
+/** Any payee name, for the same layouts when the counterparty is an ordinary merchant or person. */
+private const val ANY_PAYEE = """[a-z][a-z0-9 .&'-]{0,79}?"""
+
+/** ICICI account debit naming who was credited; [payee] decides which counterparties match. */
+private fun iciciRecipientCredit(payee: String) =
+    """^icici bank acct\s+[x*]+(?<account>\d{3,4})\s+debited for\s+$MONEY\s+on\s+""" +
+        """\d{1,2}-[a-z]{3}-\d{2,4};\s*(?<merchant>$payee)\s+credited\.\s*upi:\d{9,14}\.""" +
+        """(?:\s*(?:call|sms|to dispute)[\s\S]*)?$"""
+
+/** PNB account debit naming who was paid; [payee] decides which counterparties match. */
+private fun pnbUpiDebit(payee: String) =
+    """^a/c\s+[x*]+(?<account>\d{4})\s+debited\s+$MONEY\s+dt\s+\d{1,2}-\d{1,2}-\d{2,4}\s+[\d:]+""" +
+        """\s+to\s+(?<merchant>$payee)\s+thru\s+upi\b"""
+
+/**
  * Every SMS layout the parser knows, in match order: first match wins, so specific bank layouts come
  * before generic ones. Patterns are compiled once, when this object is first touched.
  *
@@ -501,11 +521,21 @@ object TemplateRepository {
 
     /** Bank-account statement layouts: one masked account, sometimes a rail tag or a counterparty. */
     private fun accountLayouts(): List<ParsingTemplate> = listOf(
+        // A UPI debit to a credit-card bill payee repays spends already in the ledger. It comes
+        // before the generic recipient layout so a repayment is never booked as a fresh spend.
+        ParsingTemplate(
+            templateId = "icici_card_bill_repayment",
+            regexPattern = iciciRecipientCredit(CARD_BILL_PAYEE),
+            direction = Direction.Debit,
+            status = TransactionStatus.Successful,
+            channel = Channel.UPI,
+            transactionType = TransactionType.CardRepayment
+        ),
         // ICICI account debit naming the recipient of the payment. Anchored end-to-end (only a
         // dispute/contact tail may follow) so an OTP prefix or a second movement stops matching.
         ParsingTemplate(
             templateId = "icici_debit_recipient_credit",
-            regexPattern = """^icici bank acct\s+[x*]+(?<account>\d{3,4})\s+debited for\s+$MONEY\s+on\s+\d{1,2}-[a-z]{3}-\d{2,4};\s*(?<merchant>[a-z][a-z0-9 .&'-]{0,79}?)\s+credited\.\s*upi:\d{9,14}\.(?:\s*(?:call|sms|to dispute)[\s\S]*)?$""",
+            regexPattern = iciciRecipientCredit(ANY_PAYEE),
             direction = Direction.Debit,
             status = TransactionStatus.Successful,
             channel = Channel.UPI,
@@ -577,9 +607,18 @@ object TemplateRepository {
             transactionType = TransactionType.Unknown
         ),
         // PNB UPI statement lines.
+        // Same layout, card-bill payee first: repaying a card is not a new spend.
+        ParsingTemplate(
+            templateId = "pnb_card_bill_repayment",
+            regexPattern = pnbUpiDebit(CARD_BILL_PAYEE),
+            direction = Direction.Debit,
+            status = TransactionStatus.Successful,
+            channel = Channel.UPI,
+            transactionType = TransactionType.CardRepayment
+        ),
         ParsingTemplate(
             templateId = "pnb_upi_debit",
-            regexPattern = """^a/c\s+[x*]+(?<account>\d{4})\s+debited\s+$MONEY\s+dt\s+\d{1,2}-\d{1,2}-\d{2,4}\s+[\d:]+\s+to\s+(?<merchant>[^\r\n]{1,60}?)\s+thru\s+upi\b""",
+            regexPattern = pnbUpiDebit("""[^\r\n]{1,60}?"""),
             direction = Direction.Debit,
             status = TransactionStatus.Successful,
             channel = Channel.UPI,
