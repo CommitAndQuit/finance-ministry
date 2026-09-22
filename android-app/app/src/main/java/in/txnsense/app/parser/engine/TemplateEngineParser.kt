@@ -9,6 +9,7 @@ import `in`.txnsense.app.core.model.ParseDecision
 import `in`.txnsense.app.core.model.TransactionStatus
 import `in`.txnsense.app.core.model.TransactionType
 import `in`.txnsense.app.parser.ParserRules
+import `in`.txnsense.app.parser.induction.RegexSafety
 import java.math.BigInteger
 
 /**
@@ -18,8 +19,12 @@ import java.math.BigInteger
  * first pattern that matches decides the transaction and returns immediately; a message no template
  * recognizes is rejected. There are no heuristics and no pre-filters — coverage and accuracy come
  * from adding templates.
+ *
+ * [learned] holds layouts the app induced for itself. They are tried only once every curated
+ * template has declined, so learning can add coverage but can never change an answer the curated
+ * templates already give, and each is time-boxed while matching because nothing hand-audited it.
  */
-class TemplateEngineParser {
+class TemplateEngineParser(private val learned: List<ParsingTemplate> = emptyList()) {
 
     fun parse(input: IncomingSms): ParseAssessment {
         val assessment = assess(ParserRules.transactionText(input.body))
@@ -37,6 +42,11 @@ class TemplateEngineParser {
     private fun assess(text: String): ParseAssessment {
         for (template in TemplateRepository.templates) {
             val match = template.regex.find(text) ?: continue
+            if (template.accept?.invoke(match) == false) continue
+            return matched(template, match)
+        }
+        for (template in learned) {
+            val match = RegexSafety.findWithin(template.regex, text) ?: continue
             if (template.accept?.invoke(match) == false) continue
             return matched(template, match)
         }
