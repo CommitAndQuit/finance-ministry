@@ -1,0 +1,572 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 6,
+    "identityHash": "ff68272f18349ab63762e190ddc0d4a4",
+    "entities": [
+      {
+        "tableName": "transactions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceFingerprint` BLOB, `sourceType` TEXT NOT NULL, `sourceTimestamp` INTEGER NOT NULL, `effectiveTimestamp` INTEGER NOT NULL, `amountMinor` INTEGER, `currency` TEXT, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `counterpartyLabel` TEXT, `maskedAccountHint` TEXT, `userNotes` TEXT, `confidence` INTEGER NOT NULL, `reviewState` TEXT NOT NULL, `parserVersion` INTEGER NOT NULL, `isUserCorrected` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `referenceHash` BLOB, `linkedOriginalId` TEXT, `importBatchId` TEXT, `category` TEXT NOT NULL, `ownership` TEXT NOT NULL, `groupLabel` TEXT, `personalShareMinor` INTEGER, `repaidMinor` INTEGER NOT NULL, `paymentSourceId` TEXT, `bankName` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceFingerprint",
+            "columnName": "sourceFingerprint",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "sourceType",
+            "columnName": "sourceType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceTimestamp",
+            "columnName": "sourceTimestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "effectiveTimestamp",
+            "columnName": "effectiveTimestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amountMinor",
+            "columnName": "amountMinor",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "currency",
+            "columnName": "currency",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transactionType",
+            "columnName": "transactionType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "counterpartyLabel",
+            "columnName": "counterpartyLabel",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "maskedAccountHint",
+            "columnName": "maskedAccountHint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "userNotes",
+            "columnName": "userNotes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reviewState",
+            "columnName": "reviewState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parserVersion",
+            "columnName": "parserVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isUserCorrected",
+            "columnName": "isUserCorrected",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referenceHash",
+            "columnName": "referenceHash",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "linkedOriginalId",
+            "columnName": "linkedOriginalId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "importBatchId",
+            "columnName": "importBatchId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownership",
+            "columnName": "ownership",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupLabel",
+            "columnName": "groupLabel",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "personalShareMinor",
+            "columnName": "personalShareMinor",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "repaidMinor",
+            "columnName": "repaidMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentSourceId",
+            "columnName": "paymentSourceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bankName",
+            "columnName": "bankName",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_transactions_sourceFingerprint",
+            "unique": true,
+            "columnNames": [
+              "sourceFingerprint"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_transactions_sourceFingerprint` ON `${TABLE_NAME}` (`sourceFingerprint`)"
+          }
+        ]
+      },
+      {
+        "tableName": "corrections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `transactionId` TEXT NOT NULL, `correctedAt` INTEGER NOT NULL, `fieldName` TEXT NOT NULL, `previousValue` TEXT, `newValue` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`transactionId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transactionId",
+            "columnName": "transactionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "correctedAt",
+            "columnName": "correctedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fieldName",
+            "columnName": "fieldName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousValue",
+            "columnName": "previousValue",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "newValue",
+            "columnName": "newValue",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_corrections_transactionId",
+            "unique": false,
+            "columnNames": [
+              "transactionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_corrections_transactionId` ON `${TABLE_NAME}` (`transactionId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "transactions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "transactionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "import_batches",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `start` INTEGER NOT NULL, `end` INTEGER NOT NULL, `inserted` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inserted",
+            "columnName": "inserted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "payment_sources",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `nickname` TEXT NOT NULL, `kind` TEXT NOT NULL, `channel` TEXT NOT NULL, `bankName` TEXT, `last4` TEXT, `active` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nickname",
+            "columnName": "nickname",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bankName",
+            "columnName": "bankName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "last4",
+            "columnName": "last4",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "skeleton_sightings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`layoutKey` TEXT NOT NULL, `bankId` TEXT NOT NULL, `encoded` TEXT NOT NULL, `sightings` INTEGER NOT NULL, `firstSeen` INTEGER NOT NULL, `lastSeen` INTEGER NOT NULL, PRIMARY KEY(`layoutKey`))",
+        "fields": [
+          {
+            "fieldPath": "layoutKey",
+            "columnName": "layoutKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bankId",
+            "columnName": "bankId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encoded",
+            "columnName": "encoded",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sightings",
+            "columnName": "sightings",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstSeen",
+            "columnName": "firstSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeen",
+            "columnName": "lastSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "layoutKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_skeleton_sightings_bankId",
+            "unique": false,
+            "columnNames": [
+              "bankId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_skeleton_sightings_bankId` ON `${TABLE_NAME}` (`bankId`)"
+          },
+          {
+            "name": "index_skeleton_sightings_lastSeen",
+            "unique": false,
+            "columnNames": [
+              "lastSeen"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_skeleton_sightings_lastSeen` ON `${TABLE_NAME}` (`lastSeen`)"
+          }
+        ]
+      },
+      {
+        "tableName": "learned_templates",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`templateId` TEXT NOT NULL, `bankId` TEXT NOT NULL, `regexPattern` TEXT NOT NULL, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `sampleCount` INTEGER NOT NULL, `literalChars` INTEGER NOT NULL, `anchorCount` INTEGER NOT NULL, `state` TEXT NOT NULL, `agreements` INTEGER NOT NULL, `contradictions` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastMatchedAt` INTEGER, `promotedAt` INTEGER, `retiredAt` INTEGER, PRIMARY KEY(`templateId`))",
+        "fields": [
+          {
+            "fieldPath": "templateId",
+            "columnName": "templateId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bankId",
+            "columnName": "bankId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "regexPattern",
+            "columnName": "regexPattern",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transactionType",
+            "columnName": "transactionType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleCount",
+            "columnName": "sampleCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "literalChars",
+            "columnName": "literalChars",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "anchorCount",
+            "columnName": "anchorCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agreements",
+            "columnName": "agreements",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contradictions",
+            "columnName": "contradictions",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastMatchedAt",
+            "columnName": "lastMatchedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "promotedAt",
+            "columnName": "promotedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "retiredAt",
+            "columnName": "retiredAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "templateId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_learned_templates_bankId",
+            "unique": false,
+            "columnNames": [
+              "bankId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_learned_templates_bankId` ON `${TABLE_NAME}` (`bankId`)"
+          },
+          {
+            "name": "index_learned_templates_state",
+            "unique": false,
+            "columnNames": [
+              "state"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_learned_templates_state` ON `${TABLE_NAME}` (`state`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ff68272f18349ab63762e190ddc0d4a4')"
+    ]
+  }
+}

@@ -58,11 +58,86 @@ class TransactionRepository(private val context: Context, private val namespace:
     val preferences = context.getSharedPreferences("${namespace}_settings", Context.MODE_PRIVATE)
     val revision = MutableStateFlow(0L)
     val eraseGeneration = MutableStateFlow(0L)
-    private val parser = TemplateEngineParser()
     private var importEpoch = UUID.randomUUID().toString()
     private fun db(): FinanceDatabase = database ?: FinanceDatabase.open(context,
         secrets.databasePassphrase(context.getDatabasePath(dbName).exists()), dbName).also { database = it }
     private suspend fun <T> locked(block: suspend () -> T): T = withContext(Dispatchers.IO) { mutex.withLock { block() } }
+
+    /** Rebuilt whenever a learned layout changes state, and dropped with the database on erase. */
+    private var learningSession: TemplateLearning? = null
+    private var cachedParser: TemplateEngineParser? = null
+    private var cachedLearnedIds: List<String> = emptyList()
+
+    /** Present only while a database exists; erasing drops both it and everything it learned. */
+    private fun learning(): TemplateLearning =
+        learningSession ?: TemplateLearning(db().learning()).also { learningSession = it }
+
+    /** True when learning is switched on and there is a database to have learned anything in. */
+    private fun learningReady(): Boolean =
+        learningEnabled() && (database != null || context.getDatabasePath(dbName).exists())
+
+    /**
+     * The parser, including any layout learning has promoted.
+     *
+     * Learned layouts are appended after every curated template and can only ever ask for review, so
+     * rebuilding this can add coverage but cannot change an answer the curated templates already give.
+     * Must be called while holding the lock, because reading the active set opens the database.
+     */
+    private fun parser(): TemplateEngineParser {
+        val active = if (learningReady()) learning().activeTemplates() else emptyList()
+        val ids = active.map(`in`.txnsense.app.parser.engine.ParsingTemplate::templateId)
+        if (cachedParser == null || cachedLearnedIds != ids) {
+            cachedParser = TemplateEngineParser(active)
+            cachedLearnedIds = ids
+        }
+        return cachedParser!!
+    }
+
+    /** Learning is off until the user turns it on, and off again after an erase clears preferences. */
+    fun learningEnabled(): Boolean = preferences.getBoolean("pattern_learning", false)
+
+    suspend fun setLearningEnabled(enabled: Boolean) = locked {
+        check(preferences.edit().putBoolean("pattern_learning", enabled).commit())
+        cachedParser = null
+        // Turning learning off is meant to undo it, not just pause it: a user who declines this should
+        // not be left with a corpus of layouts and templates they no longer want.
+        if (!enabled && (database != null || context.getDatabasePath(dbName).exists())) learning().clear()
+        if (namespace == "finance") {
+            try {
+                if (enabled) `in`.txnsense.app.sms.TemplateInductionJob.schedule(context)
+                else `in`.txnsense.app.sms.TemplateInductionJob.cancel(context)
+            } catch (_: Exception) { /* Scheduling is best-effort; the user can also induce on demand. */ }
+        }
+        revision.value++
+    }
+
+    suspend fun learningSummary(): LearningSummary = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) LearningSummary(0, 0, 0, 0)
+        else learning().summary()
+    }
+
+    suspend fun learnedTemplates(): List<LearnedTemplateEntity> = locked {
+        if (database == null && !context.getDatabasePath(dbName).exists()) emptyList() else learning().learnedTemplates()
+    }
+
+    suspend fun forgetLearnedTemplate(templateId: String) = locked {
+        learning().forget(templateId)
+        cachedParser = null
+        revision.value++
+    }
+
+    /** Runs induction over everything remembered so far. Called by the idle job, and by the user. */
+    suspend fun induceTemplates(): InductionReport = locked {
+        if (!learningEnabled()) return@locked InductionReport(0, emptyList(), emptyList())
+        if (database == null && !context.getDatabasePath(dbName).exists()) {
+            return@locked InductionReport(0, emptyList(), emptyList())
+        }
+        val session = learning()
+        session.prune()
+        val report = session.induce()
+        if (report.learned.isNotEmpty()) { cachedParser = null; revision.value++ }
+        report
+    }
 
     suspend fun snapshot(offset: Int = 0, filter: String = "All", sourceKindFilter: String = "All", today: LocalDate = LocalDate.now(),
         currentDay: LocalDate = today): LedgerSnapshot = locked {
@@ -270,6 +345,13 @@ class TransactionRepository(private val context: Context, private val namespace:
         progress: (Int) -> Unit = {}): ImportPreview = withContext(Dispatchers.IO) {
         check(historyPermissionGranted()) { "Reading existing SMS is not permitted." }
         val epoch = locked { importEpoch }
+        val engine = locked { parser() }
+        // Months of history in one pass is the best evidence learning will ever get, so unread layouts
+        // here are remembered. Shadow promotion is deliberately *not* run: one layout can appear fifty
+        // times in three months, and a pattern that graduated off a single bulk scan would have proved
+        // nothing about live traffic. Nor is the contradiction audit, which would mean running every
+        // learned pattern over thousands of messages inside what is meant to be a responsive preview.
+        val learnFromHistory = locked { learningEnabled() }
         val window = ImportWindow.lastThreeMonths(now)
         val candidates = mutableListOf<ImportCandidate>()
         val seen = mutableSetOf<String>()
@@ -280,8 +362,12 @@ class TransactionRepository(private val context: Context, private val namespace:
             check(++scanned <= 20000) { "Too many messages to preview safely. Nothing was imported." }
             if (!window.contains(message.date)) { ignored++ }
             else {
-                val parsed = parser.parse(IncomingSms(message.sender, message.date, message.body))
-                if (parsed.decision == ParseDecision.Reject) ignored++ else locked {
+                val sms = IncomingSms(message.sender, message.date, message.body)
+                val parsed = engine.parse(sms)
+                if (parsed.decision == ParseDecision.Reject) {
+                    ignored++
+                    if (learnFromHistory) locked { learning().remember(sms) }
+                } else locked {
                     check(epoch == importEpoch) { "Data changed. Start a new scan." }
                     val timestamp = message.sentDate.takeIf { it > 0 } ?: message.date
                     val primary = secrets.hmacSource(message.sender, timestamp, message.body)
@@ -355,8 +441,20 @@ class TransactionRepository(private val context: Context, private val namespace:
 
     suspend fun ingest(sms: IncomingSms, onSaved: (TransactionEntity) -> Unit = {}): Boolean = locked {
         if (!captureAllowed()) return@locked false
-        val parsed = parser.parse(sms)
-        if (parsed.decision == ParseDecision.Reject) return@locked false
+        val parsed = parser().parse(sms)
+        if (parsed.decision == ParseDecision.Reject) {
+            // Nothing read this message. Remember its layout, and let the probationary layouts try it:
+            // this is the only moment a pattern can earn its promotion, and it costs an unread message.
+            if (learningEnabled()) {
+                val session = learning()
+                session.remember(sms)
+                session.shadowEvaluate(sms)
+            }
+            return@locked false
+        }
+        // A curated template answered, so there is a right answer to check the learned ones against.
+        // Any that would have read this message differently is retired here, before it books anything.
+        if (learningReady() && parsed.ruleId !in cachedLearnedIds) learning().auditAgainstCurated(sms, parsed)
         val now = System.currentTimeMillis()
         val referenceHash = `in`.txnsense.app.parser.TransactionReference.extract(sms.body)?.let {
             secrets.hmacSource("transaction-reference-v1:${sms.sender.lowercase(java.util.Locale.ROOT)}", 0, it)
@@ -492,14 +590,21 @@ class TransactionRepository(private val context: Context, private val namespace:
         eraseGeneration.value++
         // Disable capture before deletion; queued broadcasts recheck it inside this same mutex.
         check(preferences.edit().clear().commit())
+        // Clearing preferences already turned learning off. Drop the session and the parser with the
+        // database so nothing keeps matching layouts derived from messages that no longer exist here.
+        learningSession = null; cachedParser = null; cachedLearnedIds = emptyList()
         database?.close(); database = null
         val file = context.getDatabasePath(dbName)
         if (file.exists()) check(context.deleteDatabase(dbName)) { "Database deletion failed. Capture remains off." }
         secrets.erase()
         if (namespace == "finance") context.getSystemService(NotificationManager::class.java).cancelAll()
         if (namespace == "finance") `in`.txnsense.app.sms.ReviewReminder.cancel(context)
+        if (namespace == "finance") {
+            try { `in`.txnsense.app.sms.TemplateInductionJob.cancel(context) }
+            catch (_: Exception) { /* Erasure already removed everything the job could have read. */ }
+        }
         revision.value++
     }
 
-    suspend fun close() = locked { database?.close(); database = null }
+    suspend fun close() = locked { learningSession = null; cachedParser = null; cachedLearnedIds = emptyList(); database?.close(); database = null }
 }

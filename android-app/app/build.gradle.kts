@@ -78,6 +78,7 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.androidx.sqlite)
     implementation(libs.sqlcipher)
+    implementation(libs.work.runtime)
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.compose.bom))

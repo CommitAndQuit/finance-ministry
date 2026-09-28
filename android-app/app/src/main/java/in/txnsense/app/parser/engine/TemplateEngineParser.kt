@@ -26,8 +26,21 @@ import java.math.BigInteger
  */
 class TemplateEngineParser(private val learned: List<ParsingTemplate> = emptyList()) {
 
-    fun parse(input: IncomingSms): ParseAssessment {
-        val assessment = assess(ParserRules.transactionText(input.body))
+    fun parse(input: IncomingSms): ParseAssessment =
+        identify(input, assess(ParserRules.transactionText(input.body)))
+
+    /**
+     * Reads [input] using the learned layouts only, skipping the curated pass.
+     *
+     * Shadow evaluation needs this. It runs on messages the curated templates have just declined, and
+     * making it discover that a second time would double the parsing work on the SMS receiver's thread
+     * for every message that is not a transaction — which is most of them.
+     */
+    fun parseLearned(input: IncomingSms): ParseAssessment =
+        identify(input, assessLearned(ParserRules.transactionText(input.body)))
+
+    /** Attaches the issuer, which comes from the sender rather than from any template. */
+    private fun identify(input: IncomingSms, assessment: ParseAssessment): ParseAssessment {
         if (assessment.decision == ParseDecision.Reject) return assessment
         // Sender id is the most reliable bank signal; fall back to the body when it is opaque.
         val bank = BankRegistry.detect(input.sender) ?: BankRegistry.detect(input.body)
@@ -45,6 +58,10 @@ class TemplateEngineParser(private val learned: List<ParsingTemplate> = emptyLis
             if (template.accept?.invoke(match) == false) continue
             return matched(template, match)
         }
+        return assessLearned(text)
+    }
+
+    private fun assessLearned(text: String): ParseAssessment {
         for (template in learned) {
             val match = RegexSafety.findWithin(template.regex, text) ?: continue
             if (template.accept?.invoke(match) == false) continue

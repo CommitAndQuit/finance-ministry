@@ -220,6 +220,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                         SettingsRow("SMS and past messages", if (captureEnabled) "New SMS capture is on" else "Capture is off · Manual entry still works") { settingsSection = "SMS & messages" }
                         SettingsRow("Payment sources", if (paymentSources.count { it.active } == 0) "Add your UPI, accounts and cards" else "${paymentSources.count { it.active }} active") { settingsSection = "Payment sources" }
                         SettingsRow("Review reminders", if (repository.preferences.getBoolean("review_reminder", false)) "Daily reminder is on" else "Off") { settingsSection = "Review reminders" }
+                        SettingsRow("New message formats", if (repository.learningEnabled()) "Learning from unreadable alerts" else "Off") { settingsSection = "New message formats" }
                         SettingsRow("Data and privacy", "Local storage, erasure and recovery") { settingsSection = "Data & privacy" }
                         SettingsRow("Getting started", "Review the setup checklist") { showGuide = true; settings = false; settingsSection = null }
                     }
@@ -249,6 +250,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                         `in`.txnsense.app.feature.PaymentMethodsPanel(repository)
                     }
                     "Review reminders" -> `in`.txnsense.app.feature.ReviewReminderPanel(repository, refreshGeneration)
+                    "New message formats" -> `in`.txnsense.app.feature.PatternLearningPanel(repository, refreshGeneration)
                     "Data & privacy" -> {
                         Text("Your ledger stays encrypted on this device. The app has no bank connection or payment access.")
                         Text("There is no backup or recovery after erasing data. Uninstalling the app loses your ledger.")

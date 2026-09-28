@@ -39,6 +39,31 @@ columns. No raw-message debug logging or upload feature is included. Input filte
 cannot prove arbitrary manually entered text is non-sensitive; do not paste messages,
 contact names, full account numbers, UPI IDs or OTPs into labels or notes.
 
+## Learning new message formats
+
+From alpha.11, an optional setting lets the app work out its own parsing rules for bank
+alert formats it cannot read. It is off unless you turn it on, and it needs no additional
+permission: it only ever sees messages the app already receives. There is still no Internet
+permission and nothing is sent anywhere; all of this runs on the device.
+
+When the setting is on and a message no rule can read arrives, the app stores an outline of
+its format — the recognized banking words in order, plus a typed blank recording that a value
+of some length stood in each remaining position. Amounts, account numbers, merchant and payee
+names, references, dates, links and every word outside the app's banking vocabulary are
+already blanks before anything is written, so the stored outline cannot be turned back into
+the message. Outlines are stored in the same encrypted database, keyed by a hash of the
+outline, so repeated arrivals of one format increment a counter rather than adding rows. At
+most 400 distinct outlines are kept; an outline unseen for 90 days is deleted.
+
+A derived rule is not used as soon as it exists. It first reads live messages while recording
+nothing, and only after five clean reads may it create transactions — always as records marked
+for your review, never recorded automatically, at any age. If it ever reads a message
+differently from a rule that shipped with the app, it is discarded permanently and is not
+derived again. Rules that ship with the app always take precedence. The settings screen lists
+every derived rule, its stage and what it was derived from, and can delete any of them.
+Switching the setting off deletes every outline and derived rule; so does Erase all.
+Derivation runs in the background only while the device is idle and charging.
+
 SQLCipher encrypts the database. Android Keystore protects a wrapping key and source
 HMAC key; the wrapped database password is held in private app preferences. Database
 and preferences are excluded from Android backup rules, including device transfer.

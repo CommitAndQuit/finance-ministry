@@ -163,9 +163,11 @@ interface TransactionDao {
     fun incomeByMethod(start: Long, end: Long): List<MethodIncome>
 }
 
-@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class, PaymentSourceEntity::class], version = 5, exportSchema = true)
+@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class,
+    PaymentSourceEntity::class, SkeletonSightingEntity::class, LearnedTemplateEntity::class], version = 6, exportSchema = true)
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun transactions(): TransactionDao
+    abstract fun learning(): LearningDao
     private var connectionPassword: ByteArray? = null
 
     override fun close() {
@@ -174,6 +176,24 @@ abstract class FinanceDatabase : RoomDatabase() {
     }
 
     companion object {
+        /** Adds the two tables template learning needs. Neither holds a message, only layouts. */
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS skeleton_sightings (layoutKey TEXT NOT NULL, bankId TEXT NOT NULL, " +
+                    "encoded TEXT NOT NULL, sightings INTEGER NOT NULL, firstSeen INTEGER NOT NULL, lastSeen INTEGER NOT NULL, " +
+                    "PRIMARY KEY(layoutKey))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_skeleton_sightings_bankId ON skeleton_sightings (bankId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_skeleton_sightings_lastSeen ON skeleton_sightings (lastSeen)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS learned_templates (templateId TEXT NOT NULL, bankId TEXT NOT NULL, " +
+                    "regexPattern TEXT NOT NULL, direction TEXT NOT NULL, status TEXT NOT NULL, channel TEXT NOT NULL, " +
+                    "transactionType TEXT NOT NULL, sampleCount INTEGER NOT NULL, literalChars INTEGER NOT NULL, " +
+                    "anchorCount INTEGER NOT NULL, state TEXT NOT NULL, agreements INTEGER NOT NULL, " +
+                    "contradictions INTEGER NOT NULL, createdAt INTEGER NOT NULL, lastMatchedAt INTEGER, " +
+                    "promotedAt INTEGER, retiredAt INTEGER, PRIMARY KEY(templateId))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_learned_templates_bankId ON learned_templates (bankId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_learned_templates_state ON learned_templates (state)")
+            }
+        }
         val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN bankName TEXT")
@@ -211,7 +231,7 @@ abstract class FinanceDatabase : RoomDatabase() {
                 System.loadLibrary("sqlcipher")
                 Logger.setTarget(NoopTarget())
                 db = Room.databaseBuilder(context, FinanceDatabase::class.java, name)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .openHelperFactory(SupportOpenHelperFactory(connectionPassword)).build()
                 db.connectionPassword = connectionPassword
                 db.openHelper.writableDatabase
