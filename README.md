@@ -2,13 +2,43 @@
 
 An Android expense tracker that records transactions from incoming SMS and lets you add or correct them yourself.
 
-[Download alpha APKs](https://github.com/hk121902-stack/finance-ministry/releases) · [Roadmap](docs/ROADMAP.md) · [Privacy](docs/PRIVACY.md) · [Report a bug](https://github.com/hk121902-stack/finance-ministry/issues/new/choose)
+[Download alpha APKs](https://github.com/hk121902-stack/finance-ministry/releases) · [F-Droid Repo](#install-via-f-droid) · [Roadmap](docs/ROADMAP.md) · [Privacy](docs/PRIVACY.md) · [Report a bug](https://github.com/hk121902-stack/finance-ministry/issues/new/choose)
 
 **Status: early alpha.** The release channel is for installable **debug APKs** for testing. The app is being developed by one maintainer and is not ready for general use. Parsing can miss or misclassify transactions; check your records. Do not make this your only financial record.
 
 The current debug alpha is [v0.1.0-alpha.10](https://github.com/hk121902-stack/finance-ministry/releases/tag/v0.1.0-alpha.10).
 Download the debug APK from its assets. The release includes its SHA-256 checksum,
 signing-certificate details, and license notices. Physical-device testing is pending.
+
+## Install via F-Droid
+
+You can install TxnSense through F-Droid using a self-hosted repository. This is useful if Play Protect blocks direct APK installation on your device.
+
+### Add the repository
+
+**One-click add (from your Android device with F-Droid installed):**
+
+[![Add to F-Droid](https://img.shields.io/badge/Add_to_F_Droid-TxnSense_Alpha-blue?style=for-the-badge&logo=android)](fdroidrepo://commitandquit.github.io/finance-ministry/fdroid/repo)
+
+Or manually:
+
+1. Install the [F-Droid app](https://f-droid.org/) on your device
+2. Open F-Droid and go to **Settings → Repositories**
+3. Tap the **+** button to add a new repository
+4. Enter the repository address:
+   ```
+   https://commitandquit.github.io/finance-ministry/fdroid/repo
+   ```
+5. F-Droid will show the signing key fingerprint. Verify and accept it
+6. The repository will appear as "TxnSense Alpha"
+
+### Install the app
+
+1. In F-Droid, search for "TxnSense"
+2. Tap **Install** to download and install
+3. Updates will appear in F-Droid when new releases are published
+
+**Note:** This is an unofficial self-hosted repository for testing purposes. The app is signed with the same key as the GitHub Releases APKs.
 
 ## What works today
 

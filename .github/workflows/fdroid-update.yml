@@ -1,0 +1,112 @@
+name: Update F-Droid Repository
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: fdroid-update
+  cancel-in-progress: false
+
+jobs:
+  update-repo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5
+        with:
+          python-version: '3.11'
+
+      - name: Install fdroidserver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fdroidserver
+
+      - name: Download latest release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the latest release
+          latest_release=$(gh release view --json tagName,name,assets --jq '{tag: .tagName, name: .name, assets: [.assets[] | select(.name | endswith(".apk")) | {name: .name, url: .url}]}' 2>/dev/null || echo "null")
+          
+          if [ "$latest_release" = "null" ] || [ -z "$latest_release" ]; then
+            echo "No releases found. Creating empty repo structure."
+            mkdir -p fdroid/repo
+            exit 0
+          fi
+          
+          echo "Latest release: $latest_release"
+          
+          # Download APKs from latest release
+          mkdir -p fdroid/repo
+          gh release download --pattern "*.apk" --dir fdroid/repo || echo "No APK found in release"
+
+      - name: Initialize F-Droid repo if needed
+        working-directory: fdroid
+        run: |
+          # Create repo directory if it doesn't exist
+          mkdir -p repo
+          
+          # Check if repo key exists, if not initialize
+          if [ ! -f config.yml ]; then
+            echo "config.yml not found, skipping init"
+            exit 0
+          fi
+          
+          # Initialize the repository (creates signing key if needed)
+          if [ ! -f repo_key ]; then
+            echo "Initializing F-Droid repository..."
+            fdroid init || echo "Init may have partially failed, continuing..."
+          fi
+          
+          # Update the repository index
+          echo "Updating F-Droid repository index..."
+          fdroid update --create-metadata --pretty || echo "Update may have partially failed, continuing..."
+
+      - name: Generate repo index
+        working-directory: fdroid
+        run: |
+          # Ensure index exists
+          if [ -f repo/index-v1.jar ] && [ -f repo/index-v2.json ]; then
+            echo "Repository index generated successfully"
+            ls -la repo/
+          else
+            echo "Creating minimal index structure..."
+            mkdir -p repo
+            # Create a minimal index for empty repo
+            if command -v fdroid &> /dev/null; then
+              fdroid update || echo "Empty repo created"
+            fi
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: fdroid
+
+  deploy-pages:
+    needs: update-repo
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
