@@ -16,12 +16,12 @@ check(!requireAlphaSigning || !alphaKeystore.isNullOrBlank()) { "Official alpha 
 
 android {
     namespace = "in.txnsense.app"
-    compileSdk = 37
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "in.txnsense.app"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 34
         versionCode = appVersion.getProperty("versionCode").toInt()
         versionName = appVersion.getProperty("versionName")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
