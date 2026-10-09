@@ -55,7 +55,15 @@ class BackupUiTest {
         val started = android.os.SystemClock.elapsedRealtime()
         try {
             rule.waitUntil(60000) {
-                rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+                try {
+                    rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+                } catch (transition: IllegalStateException) {
+                    // DocumentsUI can still own the foreground while its result is
+                    // returning. Keep the existing bounded wait, not a blind retry
+                    // of backup operations or a weaker success assertion.
+                    if (transition.message?.startsWith("No compose hierarchies found") == true) false
+                    else throw transition
+                }
             }
             android.util.Log.i("BackupUiTest", "Completed '$text' in ${android.os.SystemClock.elapsedRealtime() - started} ms")
         } catch (failure: Throwable) {

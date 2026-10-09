@@ -29,6 +29,10 @@ class CardBillPaymentUiTest {
             rule.waitForIdle()
             rule.onNodeWithText("Card bill payment").performScrollTo().performClick()
             rule.onNodeWithText("Bank payment").assertIsSelected()
+            // The form intentionally blocks saving while source lookup is in flight.
+            rule.waitUntil(15_000) {
+                rule.onAllNodes(hasText("Save transaction") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
             rule.onNodeWithText("Save transaction").assertIsDisplayed().performClick()
             rule.waitUntil(15_000) { runBlocking { repo.snapshot().rows.size == 1 } }
             assertEquals("CardRepayment", runBlocking { repo.snapshot().rows.single().transactionType })
