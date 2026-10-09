@@ -6,7 +6,7 @@ An Android expense tracker that records transactions from incoming SMS and lets 
 
 **Status: early alpha.** The release channel is for installable **debug APKs** for testing. The app is being developed by one maintainer and is not ready for general use. Parsing can miss or misclassify transactions; check your records. Do not make this your only financial record.
 
-The release candidate in this repository is **v0.1.0-alpha.18**. The latest published
+The release candidate in this repository is **v0.1.0-alpha.19**. The latest published
 debug alpha remains available from [GitHub Releases](https://github.com/hk121902-stack/finance-ministry/releases).
 Download the debug APK from its assets. The release includes its SHA-256 checksum,
 signing-certificate details, and license notices. Physical-device testing is pending.
@@ -39,6 +39,16 @@ signing-certificate details, and license notices. Physical-device testing is pen
   Generic bank debits without explicit bill-payment wording still need correction.
 - Track partial repayments and gifts/treats without mixing gross group payments into
   personal spending or silently settling any debt.
+  Open **Still owed → Money owed to you**, choose a person/group, and tap
+  **Record money received** beside the expense. Search and link a recorded incoming
+  payment without adding money-in twice, or choose **Received cash**. Save stays
+  outside the scrolling form and previews the amount still owed. Transaction
+  details retain edit/unlink history; **Month breakdown** exposes the monthly metrics.
+  Open **Still owed → Money owed to you**, choose a person/group, and tap
+  **Record money received** beside the expense. Search and link a recorded incoming
+  payment without adding money-in twice, or choose **Received cash**. Save stays
+  outside the scrolling form and previews the amount still owed. Transaction
+  details retain edit/unlink history; **Month breakdown** exposes the monthly metrics.
 - Review possible duplicate records and own-account transfers as suggestions, with
   both original records retained and decisions reversible.
 - Use spending breakdowns, remembered category rules, selected-row batch cleanup,
@@ -84,7 +94,7 @@ SMS capture and notifications are optional: declining either one never blocks ma
 transactions. The app explains why it needs SMS access before Android shows its
 permission prompt.
 
-Manual example: enter `250.50`, keep **Money out**, and save. Cash, Other and Successful are the defaults; transaction type and payment status are under **More details**. The ledger shows **Confirmed by you**.
+Manual example: enter `250.50`, keep **Money out**, and save. Cash, Other and Successful are the defaults. Choose Category and who the payment was for; technical transaction type and payment status are under **More details → Advanced details**. Use the plain-language **Card bill payment**, **Refund**, or **Transfer between my accounts** controls when relevant. Ordinary unidentified types do not require a dropdown selection; unidentified card credits still need an explicit bill/refund/other choice before confirming. The ledger shows **Confirmed by you**.
 
 Emulator-only automatic example (this command does not send a real SMS):
 ```sh

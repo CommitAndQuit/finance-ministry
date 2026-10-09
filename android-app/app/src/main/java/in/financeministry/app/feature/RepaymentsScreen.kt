@@ -30,6 +30,8 @@ fun RepaymentsScreen(repository: TransactionRepository, month: LocalDate, onBack
     var settled by rememberSaveable { mutableStateOf(false) }
     var monthOnly by rememberSaveable { mutableStateOf(false) }
     var group by rememberSaveable { mutableStateOf<String?>(null) }
+    var recordingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var monthDetails by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(month, revision, retry) {
         error = false
         try { summary = repository.repaymentSummary(month) }
@@ -42,7 +44,7 @@ fun RepaymentsScreen(repository: TransactionRepository, month: LocalDate, onBack
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.safeDrawingPadding().fillMaxSize().padding(horizontal = 20.dp)) {
             TextButton(onClick = leave) { Text("Back") }
-            Text("Repayments", style = MaterialTheme.typography.headlineMedium)
+            Text("Money owed to you", style = MaterialTheme.typography.headlineMedium)
             if (error) {
                 Text("Could not load repayments. Your ledger has not changed.")
                 TextButton(onClick = { retry++ }) { Text("Try again") }
@@ -66,11 +68,14 @@ fun RepaymentsScreen(repository: TransactionRepository, month: LocalDate, onBack
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Text(monthName, style = MaterialTheme.typography.titleMedium)
-                                    RepaymentMetric("Newly owed from this month's payments", data.newlyOwed)
-                                    RepaymentMetric("Received back during this month", data.received)
                                     RepaymentMetric("Still unpaid from this month's payments", data.monthOutstanding)
-                                    Text("Receipts this month may settle older expenses. Undated legacy repayments are not counted as monthly receipts.",
-                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    TextButton(onClick = { monthDetails = !monthDetails }) { Text(if (monthDetails) "Hide month breakdown" else "Month breakdown") }
+                                    if (monthDetails) {
+                                        RepaymentMetric("Newly owed from this month's payments", data.newlyOwed)
+                                        RepaymentMetric("Received back during this month", data.received)
+                                        Text("Receipts this month may settle older expenses. Undated legacy repayments are not counted as monthly receipts.",
+                                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                             }
                         }
@@ -110,10 +115,14 @@ fun RepaymentsScreen(repository: TransactionRepository, month: LocalDate, onBack
                                 Text("Still owed ${money(RepaymentAccounting.owed(row))}")
                                 Text("Paid ${money(row.amountMinor)} · Your share ${money(RepaymentAccounting.personal(row))}", style = MaterialTheme.typography.bodySmall)
                                 Text(transactionTime(row.effectiveTimestamp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (RepaymentAccounting.owed(row) > 0) Button(onClick = { recordingId = row.id }) { Text("Record money received") }
                                 HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
                             }
                         }
                     }
+                }
+                data.expenses.firstOrNull { it.id == recordingId }?.let { expense ->
+                    RepaymentEditor(repository, expense, null, onDismiss = { recordingId = null })
                 }
             }
         }

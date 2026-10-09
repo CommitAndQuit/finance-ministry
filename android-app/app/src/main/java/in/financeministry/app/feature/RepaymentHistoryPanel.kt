@@ -1,6 +1,9 @@
 package `in`.financeministry.app.feature
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -9,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import `in`.financeministry.app.data.*
@@ -40,7 +44,7 @@ fun RepaymentHistoryPanel(repository: TransactionRepository, expense: Transactio
         Text("Repayment history", style = MaterialTheme.typography.titleMedium)
         if (eligible && RepaymentAccounting.principal(expense) > 0) {
             Text("Expected ${money(RepaymentAccounting.principal(expense))} · Received ${money(expense.repaidMinor)}", style = MaterialTheme.typography.bodySmall)
-            if (RepaymentAccounting.owed(expense) > 0) Button(onClick = { add = true }) { Text("Record repayment") }
+            if (RepaymentAccounting.owed(expense) > 0) Button(onClick = { add = true }) { Text("Record money received") }
             else Text("Settled", style = MaterialTheme.typography.bodySmall)
         } else Text("Confirm an eligible expense before recording a repayment.", style = MaterialTheme.typography.bodySmall)
         if (history.isEmpty()) Text("No repayments recorded yet.", style = MaterialTheme.typography.bodySmall)
@@ -79,9 +83,9 @@ fun RepaymentHistoryPanel(repository: TransactionRepository, expense: Transactio
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun RepaymentEditor(repository: TransactionRepository, expense: TransactionEntity, existing: RepaymentEntity?, onDismiss: () -> Unit) {
+internal fun RepaymentEditor(repository: TransactionRepository, expense: TransactionEntity, existing: RepaymentEntity?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.amountMinor?.let { BigDecimal.valueOf(it, 2).toPlainString() } ?: "") }
@@ -95,9 +99,14 @@ private fun RepaymentEditor(repository: TransactionRepository, expense: Transact
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var discard by remember { mutableStateOf(false) }
+    var choosingPayment by rememberSaveable(existing?.id) { mutableStateOf(false) }
+    var search by rememberSaveable(existing?.id) { mutableStateOf("") }
+    val focus = LocalFocusManager.current
     val initialAmount = existing?.amountMinor?.let { BigDecimal.valueOf(it, 2).toPlainString() }.orEmpty()
+    val initialDate = rememberSaveable(existing?.id) { date }
     val dirty = amount != initialAmount || payer != (existing?.payer ?: expense.groupLabel.orEmpty()) ||
-        incomingId != existing?.incomingId || (existing != null && (dateKnown != (existing.receivedAt != null) || dateKnown && date != existing.receivedAt))
+        incomingId != existing?.incomingId || method != (existing?.method ?: "Linked") ||
+        dateKnown != (existing == null || existing.receivedAt != null) || dateKnown && date != initialDate
     val close = { if (!busy) { if (dirty) discard = true else onDismiss() }; Unit }
     LaunchedEffect(expense.id) {
         try { credits = repository.availableRepaymentCredits(); loaded = true }
@@ -105,25 +114,62 @@ private fun RepaymentEditor(repository: TransactionRepository, expense: Transact
         catch (_: Exception) { error = "Could not load incoming payments. Close and retry." }
     }
     val pickerTheme = if (androidx.compose.foundation.isSystemInDarkTheme()) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
-    ModalBottomSheet(onDismissRequest = close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    val leavePicker = { focus.clearFocus(); choosingPayment = false; search = "" }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = {
+        // Material hides before this callback. Restore it when navigating within the
+        // editor, or while a save/discard decision still owns the draft.
+        if (choosingPayment) {
+            leavePicker()
+            scope.launch { sheetState.show() }
+        } else {
+            close()
+            if (busy || dirty) scope.launch { sheetState.show() }
+        }
+    }, sheetState = sheetState,
         modifier = Modifier.imePadding()) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(if (existing == null) "Record repayment" else "Edit repayment", style = MaterialTheme.typography.titleLarge)
-            Text("Still owed ${money(RepaymentAccounting.owed(expense))}", style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(amount, { amount = it }, label = { Text("Repayment amount (INR)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(payer, { payer = it.take(40) }, label = { Text("From · local name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            if (existing == null) {
-                FilterChip(selected = method == "Linked", onClick = { method = "Linked" }, label = { Text("Link an existing money-in") })
-                FilterChip(selected = method == "Cash", onClick = { method = "Cash"; incomingId = null }, label = { Text("Record cash repayment") })
+      Column(Modifier.fillMaxWidth().fillMaxHeight(.9f)) {
+        if (choosingPayment) {
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Choose a recorded payment", style = MaterialTheme.typography.titleLarge)
+                Text("Use money already received. It won't be counted twice.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(search, { search = it.take(60) }, label = { Text("Search recorded payments") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
-            if (existing == null && method == "Linked") {
-                Text("Linking allocates an existing receipt. It does not add another money-in.", style = MaterialTheme.typography.bodySmall)
-                if (!loaded) Text("Loading incoming payments…")
-                else if (credits.isEmpty()) Text("No eligible incoming payments with money available to allocate.")
-                credits.forEach { (row, available) ->
-                    FilterChip(selected = incomingId == row.id, onClick = { incomingId = row.id; date = row.effectiveTimestamp; dateKnown = true },
-                        label = { Column { Text(row.counterpartyLabel ?: "Incoming payment"); Text("${money(available)} unallocated · ${transactionTime(row.effectiveTimestamp)}", style = MaterialTheme.typography.bodySmall) } })
+            val matches = credits.filter { (row, _) -> search.isBlank() || row.counterpartyLabel.orEmpty().contains(search.trim(), ignoreCase = true) }
+                .sortedByDescending { it.first.effectiveTimestamp }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)) {
+                if (!loaded) item { Text(if (error == null) "Loading recorded payments…" else "Could not load payments. Close and retry.") }
+                else if (matches.isEmpty()) item { Text(if (credits.isEmpty()) "No recorded payments with money available. Record the incoming transaction first, or choose Received cash." else "No matching payments.") }
+                items(matches, key = { it.first.id }) { (row, available) ->
+                    Column(Modifier.fillMaxWidth().clickable {
+                        incomingId = row.id; date = row.effectiveTimestamp; dateKnown = true; method = "Linked"; error = null; leavePicker()
+                    }.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(row.counterpartyLabel ?: "Incoming payment", style = MaterialTheme.typography.titleMedium)
+                        Text("${money(available)} available · ${transactionTime(row.effectiveTimestamp)}", style = MaterialTheme.typography.bodySmall)
+                        HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
+            TextButton(onClick = leavePicker, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) { Text("Back to repayment") }
+        } else {
+        Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (existing == null) "Record money received" else "Edit repayment", style = MaterialTheme.typography.titleLarge)
+            Text("${expense.counterpartyLabel ?: "Expense"}${expense.groupLabel?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()}", style = MaterialTheme.typography.bodyMedium)
+            Text("Still owed ${money(RepaymentAccounting.owed(expense))}", style = MaterialTheme.typography.titleMedium)
+            if (existing == null) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = method == "Linked", onClick = { choosingPayment = true; focus.clearFocus() }, label = { Text("Choose a recorded payment") }, enabled = !busy)
+                FilterChip(selected = method == "Cash", onClick = { method = "Cash"; incomingId = null; error = null }, label = { Text("Received cash") }, enabled = !busy)
+            }
+            OutlinedTextField(amount, { amount = it; error = null }, label = { Text("Repayment amount (INR)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+            OutlinedTextField(payer, { payer = it.take(40) }, label = { Text("Who paid you? (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+            if (existing == null) {
+                if (method == "Linked") {
+                    val selected = credits.firstOrNull { it.first.id == incomingId }
+                    if (selected != null) {
+                        Text("Recorded payment: ${selected.first.counterpartyLabel ?: "Incoming payment"}", style = MaterialTheme.typography.bodyMedium)
+                        Text("${money(selected.second)} available to use. No new money-in will be added.", style = MaterialTheme.typography.bodySmall)
+                    } else Text("Choose the incoming payment that repays this expense.", style = MaterialTheme.typography.bodySmall)
                 }
             }
             if (existing?.incomingId != null || existing == null && method == "Linked") {
@@ -143,8 +189,19 @@ private fun RepaymentEditor(repository: TransactionRepository, expense: Transact
                 Text(if (existing?.method == "Legacy") "Updating this history does not create an incoming transaction."
                     else "Saving creates one manual cash receipt and links it to this expense.", style = MaterialTheme.typography.bodySmall)
             }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(enabled = !busy && (existing != null || method == "Cash" || incomingId != null), modifier = Modifier.fillMaxWidth(), onClick = {
+        }
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+          Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val remaining = try {
+                val minor = ManualInput(amount, `in`.financeministry.app.core.model.Direction.Credit, date, `in`.financeministry.app.core.model.TransactionType.Other).amountMinor()
+                val available = Math.addExact(RepaymentAccounting.owed(expense), existing?.amountMinor ?: 0)
+                (available - minor).takeIf { minor <= available }
+            } catch (_: IllegalArgumentException) { null } catch (_: ArithmeticException) { null }
+            remaining?.let { Text("Still owed after saving: ${money(it)}", style = MaterialTheme.typography.bodySmall) }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !busy && (existing != null || method == "Cash" || incomingId != null), modifier = Modifier.weight(1f), onClick = {
+                if (busy || existing == null && method != "Cash" && incomingId == null) return@Button
                 busy = true
                 scope.launch {
                     try {
@@ -158,7 +215,11 @@ private fun RepaymentEditor(repository: TransactionRepository, expense: Transact
                 }
             }) { Text(if (busy) "Saving…" else "Save repayment") }
             TextButton(onClick = close, enabled = !busy) { Text("Cancel") }
+            }
+          }
         }
+        }
+      }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Discard repayment changes?") },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Discard changes") } },

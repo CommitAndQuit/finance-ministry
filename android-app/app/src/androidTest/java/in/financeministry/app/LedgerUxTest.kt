@@ -45,7 +45,7 @@ class LedgerUxTest {
         try {
             repository.preferences.edit().putString("preferred_name", "").commit()
             rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("Personalization").performClick()
+            rule.onNodeWithText("Personalization").performScrollTo().assertIsDisplayed().performClick()
             rule.onNodeWithText("Preferred name").performTextInput("Asha")
             rule.onNodeWithText("Save name").performClick()
             rule.onNodeWithText("Home").performClick()
@@ -124,7 +124,7 @@ class LedgerUxTest {
         rule.onNodeWithText("SMS & notifications").performClick()
         rule.onNodeWithText("Recording notifications").assertExists()
         rule.onNodeWithText("Back").performClick()
-        rule.onNodeWithText("Data and privacy").performClick()
+        rule.onNodeWithText("Data and privacy").performScrollTo().assertIsDisplayed().performClick()
         rule.onNodeWithText("Erase all local data").performScrollTo().assertExists()
         rule.onNodeWithText("Back").performClick()
         rule.onNodeWithText("Home").performClick()
@@ -284,8 +284,7 @@ class LedgerUxTest {
             rule.onNodeWithText("Edit / confirm").performClick()
             rule.onNodeWithText("Money out").assertIsSelected()
             rule.onNodeWithText("Amount (INR)").performTextInput("81.25")
-            rule.onNodeWithText("Transaction type — please choose: Not identified").performScrollTo().performClick()
-            rule.onNodeWithText("Other").performClick()
+            rule.onNodeWithText("Transaction type — please choose: Not identified").assertDoesNotExist()
             rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
             rule.waitForIdle()
             try {
@@ -327,8 +326,7 @@ class LedgerUxTest {
             rule.onNodeWithText("Edit / confirm").performClick()
             rule.onNodeWithText("Category: Other").performScrollTo().performClick()
             rule.onNodeWithText("Food").performClick()
-            rule.onNodeWithText("Transaction type — please choose: Not identified").performScrollTo().performClick()
-            rule.onNodeWithText("Other").performClick()
+            rule.onNodeWithText("Transaction type — please choose: Not identified").assertDoesNotExist()
             rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
             try {
                 rule.waitUntil(15_000) { rule.onAllNodesWithContentDescription("Add transaction").fetchSemanticsNodes().isNotEmpty() }

@@ -4,6 +4,25 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.19
+
+- Simplify money owed: record money received directly from an outstanding expense,
+  search recorded incoming payments in a bounded picker, or record a cash receipt.
+  Keep Save above the keyboard, show the remaining amount before saving, and tuck
+  additional monthly metrics into Month breakdown. Repayment accounting and
+  existing receipt/edit/unlink protections remain unchanged.
+- Simplify transaction entry: keep Category and spending purpose prominent, move
+  the technical transaction type to Advanced details, and offer plain-language
+  card bill, refund and own-account transfer actions. Ordinary unidentified
+  payments can be confirmed without a type dropdown; unidentified card credits
+  still require an explicit accounting choice. Existing accounting types and
+  financial calculations remain unchanged.
+
+- Verification: targeted Android 16 form/repayment regression checks, dark/larger-text
+  repayment checks, JVM tests, lint and APK assembly. Physical-device and
+  OEM-background delivery validation remain pending. This remains a debuggable
+  GitHub alpha, not a Google Play production release.
+
 ## 0.1.0-alpha.18
 
 - Replace the short first-use checklist with a guided App tour covering recording,

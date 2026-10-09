@@ -32,7 +32,7 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     var direction by rememberSaveable(existing?.id) { mutableStateOf(existing?.direction ?: "Debit") }
     var status by rememberSaveable(existing?.id) { mutableStateOf(existing?.status ?: "Successful") }
     var type by rememberSaveable(existing?.id) { mutableStateOf(existing?.transactionType ?: "Other") }
-    var previousType by rememberSaveable(existing?.id) { mutableStateOf(existing?.transactionType?.takeUnless { it == "CardRepayment" } ?: "Other") }
+    var previousType by rememberSaveable(existing?.id) { mutableStateOf(existing?.transactionType?.takeUnless { it in listOf("CardRepayment", "Refund") } ?: "Other") }
     var channel by rememberSaveable(existing?.id) { mutableStateOf(existing?.channel ?: "CashManual") }
     val initialDate = rememberSaveable(existing?.id) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(existing?.effectiveTimestamp ?: System.currentTimeMillis()), ZoneId.systemDefault()).format(formatter)
@@ -50,7 +50,9 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     var rememberCategory by rememberSaveable(existing?.id) { mutableStateOf(false) }
     var rememberForSource by rememberSaveable(existing?.id) { mutableStateOf(false) }
     var sourceId by rememberSaveable(existing?.id) { mutableStateOf(existing?.paymentSourceId) }
-    var sources by remember { mutableStateOf<List<PaymentSourceEntity>>(emptyList()) }
+    val sourceLookup = paymentSourcesForForm(repository, existing?.id)
+    val sources = sourceLookup.sources
+    val sourcesReady = sourceLookup.ready
     var availableCategories by remember { mutableStateOf(transactionCategories) }
     var addingCategory by remember { mutableStateOf(false) }
     val revision by repository.revision.collectAsState()
@@ -64,7 +66,6 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     val initialFields = rememberSaveable(existing?.id) { listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId, repaymentExpected.toString()) }
     val dirty = rememberCategory || initialFields != listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId, repaymentExpected.toString())
     SideEffect { onDirtyChange(dirty) }
-    LaunchedEffect(existing?.id) { sources = repository.paymentSources() }
     LaunchedEffect(revision) { availableCategories = repository.categories() }
     val pickerTheme = if (androidx.compose.foundation.isSystemInDarkTheme()) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
     var discard by remember { mutableStateOf(false) }
@@ -77,6 +78,13 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
             Text(if (compact) "Categorize transaction" else if (existing == null) "Add transaction" else "Edit / confirm transaction",
                 style = MaterialTheme.typography.titleLarge, modifier = if (LocalConfiguration.current.fontScale >= 1.5f) Modifier.fillMaxWidth() else Modifier.weight(1f))
             if (!compact && !detailsExpanded) TextButton(onClick = { detailsExpanded = true }) { Text("More details") }
+        }
+        if (!sourcesReady) {
+            if (sourceLookup.failed) {
+                Text("Could not load payment sources. Retry before saving.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = sourceLookup.retry) { Text("Retry payment sources") }
+            }
+            else Text("Loading payment sources…", style = MaterialTheme.typography.bodySmall)
         }
         if (compact && existing != null) {
             Text("${`in`.financeministry.app.money(existing.amountMinor)} · ${existing.counterpartyLabel ?: transactionFlowLabel(existing)}", style = MaterialTheme.typography.titleMedium)
@@ -92,12 +100,6 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
             }
         }
         if (direction == "Unknown") Text("Choose money out, money in, or transfer.", color = MaterialTheme.colorScheme.error)
-        if (direction in listOf("Debit", "Credit") && ownership !in listOf("SelfTransfer", "ForOther", "Group") && type !in listOf("Refund", "Reversal", "SelfTransfer")) {
-            FilterChip(selected = type == "CardRepayment", onClick = {
-                if (type == "CardRepayment") type = previousType else { previousType = type; type = "CardRepayment" }
-            }, label = { Text("Card bill payment") })
-        }
-        if (type == "CardRepayment") Text("Pays your own card bill, not a new purchase or income. Excluded from spending and money-in/out totals.", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(label, { label = it.take(60); if (label.trim().length < 2) rememberCategory = false }, label = { Text("Merchant or short label (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         }
         Choice("Category", category, availableCategories) { category = it }
@@ -125,9 +127,30 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
                     if (option !in listOf("ForOther", "Group")) repaid = ""
                     if (option !in listOf("Group", "ForOther")) groupLabel = ""
                     if (option != "Group") personalShare = ""
-                }, label = { Text(friendly(option)) })
+                }, label = { Text(if (option == "SelfTransfer") "Transfer between my accounts" else friendly(option)) })
             }
         }
+        if (!compact && direction in listOf("Debit", "Credit") && ownership != "SelfTransfer" && type !in listOf("Reversal", "SelfTransfer")) {
+            val cardCredit = direction == "Credit" && (channel == "Card" || sources.any { it.id == sourceId && it.kind == "Credit card" })
+            if (cardCredit && type == "Unknown") Text("Is this a card bill payment, a refund, or another credit? Choose below before confirming.", style = MaterialTheme.typography.bodySmall)
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (ownership in listOf("Personal", "Family")) FilterChip(selected = type == "CardRepayment", onClick = {
+                    if (type == "CardRepayment") type = previousType else {
+                        if (type != "Refund") previousType = type
+                        type = "CardRepayment"
+                    }
+                }, label = { Text("Card bill payment") })
+                if (direction == "Credit") FilterChip(selected = type == "Refund", onClick = {
+                    if (type == "Refund") type = previousType else {
+                        if (type != "CardRepayment") previousType = type
+                        type = "Refund"
+                    }
+                }, label = { Text("Refund") })
+                if (cardCredit) FilterChip(selected = type == "Other", onClick = { type = "Other"; previousType = "Other" }, label = { Text("Other money in") })
+            }
+        }
+        if (!compact && type == "CardRepayment") Text("Pays your own card bill, not a new purchase or income. Excluded from spending and money-in/out totals.", style = MaterialTheme.typography.bodySmall)
+        if (!compact && type == "Refund") Text("Money returned for a previous payment, not new income. Refunds are shown separately in spending breakdowns.", style = MaterialTheme.typography.bodySmall)
         if (direction == "Debit" && ownership in listOf("ForOther", "Group")) {
             Text("Repayment expected?", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -175,13 +198,9 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         }
         if (sources.any { it.active && it.channel == channel } || sourceId != null) SourceChoice(sourceId, channel, sources) { sourceId = it }
         if (status == "Unknown") Choice("Payment status — please check", status, TransactionStatus.entries.map { it.name }) { status = it }
-        if (type == "Unknown") Choice("Transaction type — please choose", type, TransactionType.entries.map { it.name }) {
-            type = it
-            ownership = if (it == "SelfTransfer") "SelfTransfer" else if (ownership == "SelfTransfer") "Personal" else ownership
-        }
-        TextButton(onClick = { optional = !optional }) { Text(if (optional) "Fewer details" else "More details") }
+        TextButton(onClick = { optional = !optional }) { Text(if (optional) "Fewer details" else "Advanced details") }
         if (optional) {
-            if (type != "Unknown") Choice("Transaction type", type, TransactionType.entries.map { it.name }) {
+            Choice("Transaction type", type, TransactionType.entries.map { it.name }) {
                 type = it
                 ownership = if (it == "SelfTransfer") "SelfTransfer" else if (ownership == "SelfTransfer") "Personal" else ownership
             }
@@ -197,7 +216,7 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         HorizontalDivider()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
-                if (!busy) {
+                if (!busy && sourcesReady) {
                     if (compact && existing != null) {
                         busy = true
                         scope.launch {
@@ -214,8 +233,9 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
                     val input = try {
                         val editedTimestamp = LocalDateTime.parse(date, formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                         val timestamp = if (existing != null && date == initialDate) existing.effectiveTimestamp else editedTimestamp
+                        val chosenType = transactionTypeForSave(type, direction, channel, sources.any { it.id == sourceId && it.kind == "Credit card" })
                         ManualInput(amount, Direction.valueOf(direction), timestamp,
-                            TransactionType.valueOf(type), TransactionStatus.valueOf(status), Channel.valueOf(channel), label, notes, hint,
+                            chosenType, TransactionStatus.valueOf(status), Channel.valueOf(channel), label, notes, hint,
                             category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid, sourceId, repaymentExpected).also { it.validate() }
                     } catch (e: IllegalArgumentException) { error = e.message ?: "Check the fields."; null }
                     catch (_: java.time.DateTimeException) { error = "Enter a valid date and time as yyyy-MM-dd HH:mm."; null }
@@ -227,7 +247,7 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
                         finally { busy = false }
                     } }
                 }
-            }, enabled = !busy, modifier = Modifier.weight(1f)) { Text(if (busy) "Saving…" else "Save transaction") }
+            }, enabled = !busy && sourcesReady, modifier = Modifier.weight(1f)) { Text(if (busy) "Saving…" else "Save transaction") }
             OutlinedButton(onClick = leave, enabled = !busy) { Text("Cancel") }
         }
     }

@@ -27,7 +27,7 @@ class CardBillPaymentUiTest {
             rule.onNodeWithText("Amount (INR)").performTextInput("1000")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.waitForIdle()
-            rule.onNodeWithText("Card bill payment").performClick()
+            rule.onNodeWithText("Card bill payment").performScrollTo().performClick()
             rule.onNodeWithText("Bank payment").assertIsSelected()
             rule.onNodeWithText("Save transaction").assertIsDisplayed().performClick()
             rule.waitUntil(15_000) { runBlocking { repo.snapshot().rows.size == 1 } }

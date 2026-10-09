@@ -44,10 +44,10 @@ class RepaymentUiTest {
             rule.waitUntil(15000) { rule.onAllNodesWithText("Test flatmates").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Test flatmates").performClick()
             rule.onNodeWithText("Repayment test dinner").performClick()
-            rule.onNodeWithText("Record repayment").performScrollTo().performClick()
+            rule.onNodeWithText("Record money received").performScrollTo().performClick()
             rule.onNodeWithText("Repayment amount (INR)").performTextInput("500")
-            rule.onNodeWithText("Record cash repayment").performClick()
-            rule.onNodeWithText("Save repayment").performScrollTo().performClick()
+            rule.onNodeWithText("Received cash").performScrollTo().performClick()
+            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
             rule.waitUntil(15000) { runBlocking { r.repaymentsFor(id).size == 1 } }
             val repayment = runBlocking { r.repaymentsFor(id).single() }
             receiptId = repayment.incomingId
