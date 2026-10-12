@@ -129,7 +129,56 @@ class LedgerIntegrationTest {
             assertEquals("1000", snapshot.resultCredit.toString())
             assertEquals("700", snapshot.debit.toString())
             assertEquals("700", snapshot.resultDebit.toString())
+            assertEquals("700", snapshot.resultPersonalSpend.toString())
             assertEquals(8, snapshot.resultCount)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun filtered_personal_spending_uses_all_matching_rows_and_preserves_gifts_and_family() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        val now = System.currentTimeMillis()
+        try {
+            repository.withLedger { database ->
+                fun row(id: String, amount: Long, ownership: String = "Personal", share: Long? = null,
+                    repaymentExpected: Boolean = true, direction: String = "Debit", type: String = "Other",
+                    review: String = "Confirmed", status: String = "Successful", duplicate: String? = null,
+                    linked: String? = null) = TransactionEntity(id = id, sourceType = "Manual", sourceTimestamp = now,
+                    effectiveTimestamp = now, amountMinor = amount, direction = direction, status = status,
+                    channel = "Other", transactionType = type, reviewState = review, createdAt = now, updatedAt = now,
+                    counterpartyLabel = "Lunch $id", category = "Food", ownership = ownership,
+                    personalShareMinor = share, repaymentExpected = repaymentExpected,
+                    duplicateOfId = duplicate, linkedOriginalId = linked)
+                repeat(105) { database.transactions().insert(row("group-$it", 10000, "Group", 2500)) }
+                listOf(row("gift", 8000, "ForOther", 0, repaymentExpected = false),
+                    row("family", 4000, "Family"), row("loan", 6000, "ForOther", 0),
+                    row("income", 5000, direction = "Credit"), row("bill", 7000, type = "CardRepayment"),
+                    row("transfer", 9000, "SelfTransfer", type = "SelfTransfer"),
+                    row("pending", 3000, review = "NeedsReview"), row("excluded", 2000, review = "Dismissed"),
+                    row("failed", 1000, status = "Failed"), row("duplicate", 1500, duplicate = "family"),
+                    row("original", 3500), row("reversal", 3500, direction = "Credit", type = "Reversal",
+                        status = "Reversed", linked = "original"))
+                    .forEach { database.transactions().insert(it) }
+            }
+            val all = repository.snapshot()
+            assertEquals("1068000", all.resultDebit.toString())
+            assertEquals("5000", all.resultCredit.toString())
+            assertEquals("274500", all.resultPersonalSpend.toString())
+            assertEquals(all.personalSpend, all.resultPersonalSpend)
+            val groups = repository.snapshot(filter = "Group+Debit+Manual+Category:Food", search = "Lunch")
+            assertEquals(100, groups.rows.size)
+            assertTrue(groups.hasOlder)
+            assertEquals(105L, groups.resultCount)
+            assertEquals("1050000", groups.resultDebit.toString())
+            assertEquals("262500", groups.resultPersonalSpend.toString())
+            val older = repository.snapshot(offset = 100, filter = "Group+Debit+Manual+Category:Food", search = "Lunch")
+            assertEquals(5, older.rows.size)
+            assertEquals("262500", older.resultPersonalSpend.toString())
+            val others = repository.snapshot(filter = "ForOthers+Debit+Category:Food")
+            assertEquals("14000", others.resultDebit.toString())
+            assertEquals("8000", others.resultPersonalSpend.toString())
+            assertEquals("0", repository.snapshot(filter = "Review").resultPersonalSpend.toString())
+            assertEquals("0", repository.snapshot(search = "no matching payment").resultPersonalSpend.toString())
+            assertEquals("274500", repository.snapshot().personalSpend.toString())
         } finally { repository.eraseAll(); repository.close() }
     }
 

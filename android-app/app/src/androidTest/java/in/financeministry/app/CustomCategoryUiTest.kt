@@ -23,7 +23,7 @@ class CustomCategoryUiTest {
         val repository = TransactionRepository(ApplicationProvider.getApplicationContext<Application>(), "category_ui_${UUID.randomUUID()}")
         try {
             rule.setContent { MaterialTheme { TransactionForm(repository, null, onDone = {}) } }
-            rule.onNodeWithText("Amount (INR)").performTextInput("125.00")
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("125.00")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.waitForIdle()
             rule.onNodeWithText("Add category").performScrollTo().assertIsDisplayed().performClick()
@@ -32,8 +32,9 @@ class CustomCategoryUiTest {
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.waitForIdle()
             rule.onNodeWithText("Save category").assertIsDisplayed().performClick()
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Category: School fees").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Save transaction").assertIsDisplayed().performClick()
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorChoice("Category", "School fees")).fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).assertIsDisplayed().performClick()
             rule.waitUntil(15_000) { runBlocking { repository.snapshot().rows.size == 1 } }
             val saved = runBlocking { repository.snapshot().rows.single() }
             assertEquals(12500L, saved.amountMinor)

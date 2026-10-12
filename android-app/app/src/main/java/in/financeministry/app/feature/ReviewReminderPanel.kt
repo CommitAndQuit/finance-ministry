@@ -26,6 +26,7 @@ fun ReviewReminderPanel(repository: TransactionRepository, refreshGeneration: In
 
 @Composable private fun ReviewReminderContent(repository: TransactionRepository, refreshGeneration: Int) {
     val context = LocalContext.current
+    val pickerTheme = `in`.financeministry.app.ui.ledgerPickerTheme()
     var enabled by remember { mutableStateOf(repository.preferences.getBoolean("review_reminder", false)) }
     var hour by remember { mutableIntStateOf(repository.preferences.getInt("review_reminder_hour", 20)) }
     var minute by remember { mutableIntStateOf(repository.preferences.getInt("review_reminder_minute", 0)) }
@@ -52,7 +53,7 @@ fun ReviewReminderPanel(repository: TransactionRepository, refreshGeneration: In
                 if (Build.VERSION.SDK_INT >= 33 && !available) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else ReviewReminder.cancel(context)
         })
-        TextButton(onClick = { TimePickerDialog(context, { _, h, m ->
+        TextButton(onClick = { TimePickerDialog(context, pickerTheme, { _, h, m ->
             hour = h; minute = m; ReviewReminder.updateTime(context, h, m)
         }, hour, minute, android.text.format.DateFormat.is24HourFormat(context)).show() }) { Text(String.format(java.util.Locale.ROOT, "%02d:%02d", hour, minute)) }
     }

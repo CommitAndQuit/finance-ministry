@@ -18,11 +18,11 @@ class ManualEntryUiTest {
             repository.preferences.edit().putBoolean("sms_disclosure", false).commit()
             rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("SMS & notifications").performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("SMS & notifications")
             rule.onNodeWithText("Enable SMS capture").assertExists()
-            rule.onNodeWithText("Back").performClick()
-            rule.onNodeWithText("Home").performClick()
+            rule.onNodeWithContentDescription("Back to settings").performClick()
+            rule.onNodeWithContentDescription("Close settings").performClick()
             rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
         } finally { repository.preferences.edit().putBoolean("sms_disclosure", previous).commit() }
     }
@@ -32,8 +32,9 @@ class ManualEntryUiTest {
         val before = runBlocking { repository.snapshot().rows.map { it.id }.toSet() }
         try {
             rule.onNodeWithContentDescription("Add transaction").performClick()
-            rule.onNodeWithText("Amount (INR)").performTextInput("512.34")
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("512.34")
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             try {
                 rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 51234L } } }
             } catch (failure: Throwable) {
@@ -42,10 +43,10 @@ class ManualEntryUiTest {
             rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
             // Overview deliberately shows only four recent records. Other test fixtures can
             // be newer than this entry; verify the saved record in the complete ledger.
-            rule.onNodeWithContentDescription("Open transactions").performClick()
+            rule.onNodeWithContentDescription("Open activity").performClick()
             rule.waitUntil(15000) {
                 rule.onAllNodesWithText("Loading transactions…").fetchSemanticsNodes().isEmpty() &&
-                    rule.onAllNodesWithText("Results totals").fetchSemanticsNodes().isNotEmpty()
+                    rule.onAllNodesWithText("Totals").fetchSemanticsNodes().isNotEmpty()
             }
             val savedRow = hasText("₹512.34") and hasClickAction()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(savedRow)

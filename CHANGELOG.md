@@ -2,7 +2,56 @@
 
 User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
-## Unreleased
+## 0.1.0-alpha.21
+
+- Refresh the native app around Home, Activity, People and Review with warm light
+  surfaces, clearer dark-theme contrast, quieter fields and focused editing sheets.
+  Keep category/purpose editing short, place advanced fields under More details,
+  and keep the sheet heading, Close and primary action reachable while scrolling
+  or using the keyboard. Existing sources, import, budgets, reminders and widget
+  remain available.
+- Explain the selected month's actual spending with a numerical breakdown. Keep
+  personal/family spending and your group share separate from gross money out;
+  show money in, refunds and outstanding repayments with consistent eligibility
+  rules. Activity matching totals use the same accounting rules as Home.
+- Save reusable local groups with equal or custom default ratios. Preview exact
+  shares before applying; changing a preset does not rewrite recorded expenses.
+  Preserve existing individual settlements and protect linked repayment records
+  from incompatible financial edits.
+- Make repayment recording a focused choice between an existing recorded payment
+  and cash received. Explain possible matches, require explicit confirmation,
+  retain draft amounts when returning from the payment picker, and avoid creating
+  duplicate incoming payments. Repayments do not change the original personal share.
+- Distinguish named people from unnamed/legacy balances on Home and People. Fix
+  hidden group/self-transfer draft state when explicitly changing money out to
+  ordinary money in, without bypassing protections on existing repayments.
+- Simplify Settings, retain System/Light/Dark appearance in encrypted backups,
+  update the skippable app tour, and surface actionable capture/permission warnings
+  and dismissible backup reminders. A capture warning is not cleared merely by
+  adding a manual payment.
+- Expand bounded financial-SMS layouts and conservative reference/source handling
+  in parser revision 10. Keep uncertain origins, secondary confirmations and
+  ambiguous movements reviewable; label card-bill confirmations without presenting
+  them as income. Existing records are not silently reparsed. This does not
+  authenticate senders or establish support for every bank template.
+- Add a non-destructive Room schema 8→9 migration and encrypted backup support for
+  saved group presets. Older supported backups are upgraded during validation;
+  schema-9 backups require a schema-9-capable release and cannot be restored by
+  the published alpha.20. Create an encrypted backup before upgrading and do not
+  downgrade an updated installation. CSV remains an unencrypted report, not a restore backup.
+- Align source-visible typography, spacing, navigation, choice chips and row
+  separators with the approved HTML/CSS proposal, keeping native accessibility
+  scaling and existing financial controls. The styling follow-up passed 173 JVM
+  tests and 30 focused emulator checks in each of light and enlarged-text dark
+  configurations; lint reported no errors and 58 warnings. This is not proof of
+  an exact match against a rendered reference.
+- Release verification is still in progress. Local debug builds are not official
+  alpha downloads. Design acceptance uses the approved HTML/CSS/JS source comparison;
+  pixel-perfect rendered parity is not claimed. The previous official APK's signed
+  in-place upgrade remains unverified. Physical/OEM testing is deferred
+  for this debug alpha at the owner's request, not claimed as completed. It remains
+  important before wider distribution. No production-store readiness or general
+  parser-accuracy claim is made.
 
 ## 0.1.0-alpha.20
 

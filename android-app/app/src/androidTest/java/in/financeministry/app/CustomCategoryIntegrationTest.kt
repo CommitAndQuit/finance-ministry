@@ -94,6 +94,7 @@ class CustomCategoryIntegrationTest {
             previous.put("schema", 7)
             val oldTables = previous.getJSONObject("data").getJSONObject("tables")
             oldTables.remove("local_members"); oldTables.remove("group_shares")
+            oldTables.remove("group_presets"); oldTables.remove("group_preset_members")
             val oldRepayments = oldTables.getJSONArray("repayments")
             for (i in 0 until oldRepayments.length()) oldRepayments.getJSONObject(i).remove("memberId")
             previous.getJSONObject("data").remove("customCategories")

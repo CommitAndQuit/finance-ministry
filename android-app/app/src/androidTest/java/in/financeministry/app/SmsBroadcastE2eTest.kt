@@ -25,16 +25,21 @@ class SmsBroadcastE2eTest {
         val args = InstrumentationRegistry.getArguments()
         val expectedAmount = args.getString("expectedAmountMinor")?.toLong() ?: 31415L
         val expectedDirection = args.getString("expectedDirection") ?: "Debit"
+        val expectedReviewState = args.getString("expectedReviewState") ?: "AutoRecorded"
+        val expectedSender = args.getString("expectedSmsSender")
+        require(expectedReviewState in setOf("AutoRecorded", "NeedsReview"))
         val repetitions = (args.getString("smsRepetitions")?.toInt() ?: 1).also { require(it in 1..20) }
         val multipart = args.getString("expectMultipart") == "true"
         val observedAt = java.util.concurrent.atomic.AtomicLong(0)
         val segments = java.util.concurrent.atomic.AtomicInteger(0)
+        val observedSender = java.util.concurrent.atomic.AtomicReference<String?>(null)
         val observer = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
                 val parts = android.provider.Telephony.Sms.Intents.getMessagesFromIntent(intent)
                 if (parts.isNullOrEmpty()) return
-                observedAt.compareAndSet(0, android.os.SystemClock.elapsedRealtime())
+                observedSender.set(parts.first().originatingAddress)
                 segments.set(parts.size)
+                observedAt.compareAndSet(0, android.os.SystemClock.elapsedRealtime())
             }
         }
         val filter = android.content.IntentFilter(android.provider.Telephony.Sms.Intents.SMS_RECEIVED_ACTION).apply { priority = 999 }
@@ -46,7 +51,7 @@ class SmsBroadcastE2eTest {
         try {
             prefs.edit().putBoolean("sms_disclosure", true).putBoolean("notifications", true).commit()
             repeat(repetitions) { index ->
-            observedAt.set(0); segments.set(0)
+            observedAt.set(0); segments.set(0); observedSender.set(null)
             ready.writeText("$run:${index + 1}")
             val deadline = System.currentTimeMillis() + 45000
             var found = repository.snapshot().rows.firstOrNull { it.id !in before && it.amountMinor == expectedAmount }
@@ -54,10 +59,11 @@ class SmsBroadcastE2eTest {
                 Thread.sleep(150)
                 found = repository.snapshot().rows.firstOrNull { it.id !in before && it.amountMinor == expectedAmount }
             }
-            assertNotNull("Synthetic emulator SMS was not recorded", found)
+            assertNotNull("Synthetic emulator SMS was not recorded; broadcastObserved=${observedAt.get() > 0}, " +
+                "deliveredSegments=${segments.get()}, captureError=${prefs.getBoolean("capture_error", false)}", found)
             assertEquals("SMS", found!!.sourceType)
             assertEquals(expectedDirection, found.direction)
-            assertEquals("AutoRecorded", found.reviewState)
+            assertEquals(expectedReviewState, found.reviewState)
             // Android publishes notifications asynchronously, after the ledger row
             // can already be observed. Include that publication in capture timing.
             val notifications = app.getSystemService(NotificationManager::class.java)
@@ -71,6 +77,8 @@ class SmsBroadcastE2eTest {
             val observerDeadline = android.os.SystemClock.elapsedRealtime() + 2000
             while (observedAt.get() == 0L && android.os.SystemClock.elapsedRealtime() < observerDeadline) Thread.sleep(25)
             assertTrue("Broadcast observer did not receive SMS", observedAt.get() > 0)
+            if (expectedSender != null) assertEquals("Android must deliver the exact synthetic sender",
+                expectedSender, observedSender.get())
             if (multipart) assertTrue("Expected multiple delivered SMS segments", segments.get() > 1)
             val elapsed = android.os.SystemClock.elapsedRealtime() - observedAt.get()
             timings += elapsed

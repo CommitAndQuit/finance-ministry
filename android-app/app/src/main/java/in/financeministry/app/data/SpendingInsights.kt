@@ -23,7 +23,7 @@ object SpendingInsights {
         val previousEnd = if (current) previous.withDayOfMonth(minOf(today.dayOfMonth, previous.lengthOfMonth()))
             else start.minusDays(1)
         fun day(row: TransactionEntity) = Instant.ofEpochMilli(row.effectiveTimestamp).atZone(zone).toLocalDate()
-        val reversed = rows.filter { it.status == "Reversed" && it.reviewState != "NeedsReview" }
+        val reversed = rows.filter { it.status == "Reversed" && it.reviewState in setOf("AutoRecorded", "Confirmed") }
             .mapNotNull { it.linkedOriginalId }.toSet()
         val eligible = rows.filter { RepaymentAccounting.eligible(it, reversed) && it.direction == "Debit" }
         fun sum(items: List<TransactionEntity>) = items.fold(BigInteger.ZERO) { n, row -> n + BigInteger.valueOf(RepaymentAccounting.personal(row)) }

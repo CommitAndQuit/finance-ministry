@@ -24,16 +24,16 @@ class CardBillPaymentUiTest {
         val repo = repository()
         try {
             rule.setContent { MaterialTheme { TransactionForm(repo, null, onDone = {}) } }
-            rule.onNodeWithText("Amount (INR)").performTextInput("1000")
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("1000")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.waitForIdle()
             rule.onNodeWithText("Card bill payment").performScrollTo().performClick()
             rule.onNodeWithText("Bank payment").assertIsSelected()
             // The form intentionally blocks saving while source lookup is in flight.
             rule.waitUntil(15_000) {
-                rule.onAllNodes(hasText("Save transaction") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty()
             }
-            rule.onNodeWithText("Save transaction").assertIsDisplayed().performClick()
+            rule.onNode(publicEditorSaveButton()).assertIsDisplayed().performClick()
             rule.waitUntil(15_000) { runBlocking { repo.snapshot().rows.size == 1 } }
             assertEquals("CardRepayment", runBlocking { repo.snapshot().rows.single().transactionType })
             assertEquals("0", runBlocking { repo.snapshot().debit.toString() })
@@ -52,7 +52,7 @@ class CardBillPaymentUiTest {
             rule.onNodeWithText("Mark as card bill payment").performScrollTo().performClick()
             rule.onNodeWithText("Mark bill payment").performClick()
             rule.waitUntil(15_000) { runBlocking { repo.get("receipt")!!.transactionType == "CardRepayment" } }
-            rule.onNodeWithText("Card bill payment · Successful").assertExists()
+            rule.onNodeWithText("Card confirmation · Successful").assertExists()
             assertEquals("0", runBlocking { repo.snapshot().credit.toString() })
         } finally { runBlocking { repo.eraseAll(); repo.close() } }
     }
@@ -68,10 +68,11 @@ class CardBillPaymentUiTest {
                     createdAt = now, updatedAt = now))
             } } }
             rule.setContent { MaterialTheme { LedgerApp(repo, null, consumeRequest = {}) } }
-            rule.onNodeWithText("Transactions").performClick()
+            rule.onNodeWithContentDescription("Open activity").performClick()
             rule.onNodeWithContentDescription("Filter transactions").performClick()
+            rule.openAdvancedFilters()
             rule.onNodeWithText("Card bill payments").performScrollTo().performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15_000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("MerchantPayment").assertDoesNotExist()
             rule.onNodeWithContentDescription("Clear transaction filters").performClick()

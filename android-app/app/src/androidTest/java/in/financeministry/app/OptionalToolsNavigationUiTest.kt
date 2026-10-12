@@ -24,6 +24,7 @@ class OptionalToolsNavigationUiTest {
     @Test fun reminder_notification_opens_the_requested_optional_tool_tab() {
         launch(android.content.Intent(ApplicationProvider.getApplicationContext(), MainActivity::class.java)
             .putExtra("open_optional_tools", "Payment reminders"))
+        rule.waitUntil(15_000) { rule.onAllNodesWithText("Your recurring payment reminders").fetchSemanticsNodes().isNotEmpty() }
         rule.onNodeWithText("Your recurring payment reminders").assertExists()
         rule.onNodeWithText("Nothing is paid or recorded automatically.").assertExists()
     }
@@ -31,8 +32,9 @@ class OptionalToolsNavigationUiTest {
     @Test fun widget_quick_add_opens_manual_transaction_entry() {
         launch(android.content.Intent(ApplicationProvider.getApplicationContext(), MainActivity::class.java)
             .putExtra("open_add", true))
-        rule.onNodeWithText("Add transaction").assertExists()
-        rule.onNodeWithText("Amount (INR)").assertExists()
+        rule.waitUntil(15_000) { rule.onAllNodesWithText("Amount (INR)").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("Add payment") and !hasClickAction()).assertExists()
+        rule.onNode(editableLedgerField("Amount (INR)")).assertExists()
     }
 
     private fun launch(intent: android.content.Intent) {

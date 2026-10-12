@@ -113,7 +113,7 @@ class MatchingUiTest {
             rule.runOnUiThread { rule.activity.requestReview() }
             rule.onNodeWithText("Compare possible duplicate").assertExists()
             rule.onNodeWithText("Cancel").performScrollTo().performClick()
-            rule.onNodeWithText("Review queue").assertExists()
+            rule.onNode(hasText("Review") and !hasClickAction()).assertExists()
         } finally {
             runBlocking { r.removeRepayment(repayment.id); r.delete(requireNotNull(repayment.incomingId)); r.delete(a); r.delete(b); r.deletePaymentSource(source.id) }
         }

@@ -41,39 +41,44 @@ class VisualParityUiTest {
         try {
             InstrumentationRegistry.getInstrumentation().startActivitySync(
                 android.content.Intent(app, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Money out · month").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15_000) { rule.onAllNodesWithText("Money out").fetchSemanticsNodes().isNotEmpty() }
             rule.waitUntil(15_000) { rule.onAllNodesWithText("Loading transactions…").fetchSemanticsNodes().isEmpty() }
             capture("$variant-overview.png")
 
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Open spending breakdown"))
-            rule.onNodeWithContentDescription("Open spending breakdown").performClick()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("How totals work"))
+            rule.onNodeWithContentDescription("How totals work").performClick()
+            rule.onNodeWithText("Your month, explained").assertIsDisplayed()
+            capture("$variant-monthly-maths.png")
+            rule.onNodeWithText("See spending by category").performScrollTo().performClick()
             rule.waitUntil(15_000) { rule.onAllNodesWithContentDescription("Open Food spending").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithContentDescription("Open Food spending").assertIsDisplayed()
             capture("$variant-spending-breakdown.png")
 
             rule.onNodeWithContentDescription("Open Food spending").performClick()
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("Your share · Food").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15_000) { rule.onAllNodesWithContentDescription("Categorize Group dinner").fetchSemanticsNodes().isNotEmpty() }
             capture("$variant-transactions-category.png")
-            rule.onNodeWithText("Select").performClick()
+            rule.onNodeWithContentDescription("Filter transactions").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Select transactions").performScrollTo().performClick()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Select Group dinner"))
             rule.onNodeWithContentDescription("Select Group dinner").performClick()
             capture("$variant-transactions-selection.png")
-            rule.onNodeWithText("Done").performClick()
-            rule.onNodeWithContentDescription("Open overview").performClick()
+            rule.onNodeWithText("Done selecting").performClick()
+            rule.onNodeWithContentDescription("Open home").performClick()
             rule.onNodeWithContentDescription("Add transaction").performClick()
-            rule.onNodeWithText("Save transaction").assertIsDisplayed()
+            rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
             capture("$variant-add-transaction.png")
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithContentDescription("Close transaction editor").performClick()
             rule.onNodeWithContentDescription("Open review tab").performClick()
-            rule.waitUntil(15_000) { rule.onAllNodesWithText("You’re all caught up. No saved transactions need review.").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15_000) { rule.onAllNodesWithText("No saved payments need checking.").fetchSemanticsNodes().isNotEmpty() }
             capture("$variant-review-details.png")
             rule.onNodeWithText("Possible matches").performClick()
             rule.waitUntil(15_000) { rule.onAllNodesWithText("No possible matches found.", substring = true).fetchSemanticsNodes().isNotEmpty() }
             capture("$variant-review-matches.png")
-            rule.onNodeWithContentDescription("Open overview").performClick()
-            rule.onNodeWithText("Settings").performClick()
+            rule.onNodeWithContentDescription("Open home").performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
             capture("$variant-settings.png")
-            rule.onNodeWithText("Optional tools").performScrollTo().performClick()
+            rule.openSettingsTool("Optional tools")
             rule.waitUntil(15_000) { rule.onAllNodesWithText("₹2,500.00 left", substring = true).fetchSemanticsNodes().isNotEmpty() }
             capture("$variant-budget.png")
             rule.onNodeWithText("Payment reminders").performClick()
@@ -99,8 +104,11 @@ class VisualParityUiTest {
     private fun capture(name: String) {
         rule.waitForIdle()
         InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-        android.os.SystemClock.sleep(300)
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        rule.waitUntil(5_000) {
+            InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow
+                ?.packageName?.toString() == context.packageName
+        }
         val activeRoot = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow) {
             "Cannot validate the active window; refusing to capture unverifiable evidence."
         }

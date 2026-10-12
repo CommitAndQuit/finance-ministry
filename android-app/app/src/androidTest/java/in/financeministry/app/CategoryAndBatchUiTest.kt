@@ -17,12 +17,15 @@ class CategoryAndBatchUiTest {
         val ids = runBlocking { listOf("Batch first", "Batch second", "Batch untouched").map { label ->
             r.save(ManualInput("25", Direction.Debit, System.currentTimeMillis(), TransactionType.Other, label = label)) } }
         try {
-            rule.onNodeWithContentDescription("Open transactions").performClick()
+            rule.onNodeWithContentDescription("Open activity").performClick()
             rule.onNodeWithText("Filters").performClick()
-            rule.onNodeWithText("Search transactions").performTextInput("Batch ")
-            rule.onNodeWithText("Apply").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Search transactions").performScrollTo().performTextInput("Batch ")
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Batch first").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Select").performClick()
+            rule.onNodeWithContentDescription("Filter transactions").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Select transactions").performScrollTo().performClick()
             rule.onNodeWithText("Select transactions").assertDoesNotExist()
             rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Select Batch first").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Select Batch first"))
@@ -49,8 +52,8 @@ class CategoryAndBatchUiTest {
     @Test fun category_rule_can_be_created_disabled_and_deleted_in_settings() {
         val r = (rule.activity.application as FinanceMinistryApp).container.repository
         try {
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("Category rules").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("Category rules")
             rule.onNodeWithText("New rule").performClick()
             rule.onNodeWithText("Exact merchant").performTextInput("Rule test merchant")
             rule.onNodeWithText("Rule category: Other").performClick()

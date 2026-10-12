@@ -26,7 +26,8 @@ data class LedgerSnapshot(val rows: List<TransactionEntity>, val debit: BigInteg
     val selectedMonth: LocalDate = LocalDate.now().withDayOfMonth(1),
     val reversedOriginalIds: Set<String> = emptySet(),
     val resultCount: Long = 0, val resultDebit: BigInteger = BigInteger.ZERO,
-    val resultCredit: BigInteger = BigInteger.ZERO)
+    val resultCredit: BigInteger = BigInteger.ZERO,
+    val resultPersonalSpend: BigInteger = BigInteger.ZERO)
 
 /** All mutation, capture and erasure share one gate. No raw source is stored. */
 class TransactionRepository(private val context: Context, private val namespace: String = "finance") {
@@ -102,7 +103,8 @@ class TransactionRepository(private val context: Context, private val namespace:
                 .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(owed(row)) },
             eligibleDebits.filter { it.ownership in listOf("ForOther", "Group") }
                 .fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(owed(row)) }, month, reversedOriginals,
-            resultTotals.count, BigInteger.valueOf(resultTotals.debit), BigInteger.valueOf(resultTotals.credit))
+            resultTotals.count, BigInteger.valueOf(resultTotals.debit), BigInteger.valueOf(resultTotals.credit),
+            BigInteger.valueOf(resultTotals.personalSpend))
     }
 
     suspend fun reviewCount(): Int = locked {
@@ -166,6 +168,15 @@ class TransactionRepository(private val context: Context, private val namespace:
     private fun mappedSourceId(channel: String, hint: String?, sender: String, dao: TransactionDao): String? =
         PaymentSourceMatcher.resolve(channel, hint, sender, dao.activeSources())
 
+    /** Header scope is matching evidence, never sender authentication. Unknown headers stay exact. */
+    private fun hashTransactionReference(sender: String, reference: String): ByteArray {
+        val exact = sender.lowercase(java.util.Locale.ROOT)
+        // Only fixture-backed headers share references across two-letter telecom routes.
+        // Do not infer bank aliases or strip arbitrary prefixes/numeric sender IDs.
+        val scope = Regex("^[a-z]{2}-(hdfcbk|icicib)$").matchEntire(exact)?.groupValues?.get(1) ?: exact
+        return secrets.hmacSource("transaction-reference-v2:$scope", 0, reference)
+    }
+
     suspend fun get(id: String): TransactionEntity? = locked {
         if (database == null && !context.getDatabasePath(dbName).exists()) null else db().transactions().get(id)
     }
@@ -211,7 +222,10 @@ class TransactionRepository(private val context: Context, private val namespace:
                             confidence = parsed.confidence, reviewState = if (review) "NeedsReview" else "AutoRecorded",
                             parserVersion = parsed.parserVersion, createdAt = now, updatedAt = now,
                             ownership = if (parsed.transactionType == TransactionType.SelfTransfer) SpendingOwnership.SelfTransfer.name else SpendingOwnership.Personal.name,
-                            personalShareMinor = parsed.amountMinor.takeIf { parsed.transactionType == TransactionType.SelfTransfer })
+                            personalShareMinor = parsed.amountMinor.takeIf { parsed.transactionType == TransactionType.SelfTransfer },
+                            referenceHash = `in`.financeministry.app.parser.TransactionReference.extract(message.body)?.let {
+                                hashTransactionReference(message.sender, it)
+                            })
                         candidates += ImportCandidate(row, alternate, message.sender)
                     }
                     seen.addAll(keys)
@@ -273,9 +287,8 @@ class TransactionRepository(private val context: Context, private val namespace:
         val parsed = parser.parse(sms)
         if (parsed.decision == ParseDecision.Reject) return@locked false
         val now = System.currentTimeMillis()
-        val referenceHash = `in`.financeministry.app.parser.TransactionReference.extract(sms.body)?.let {
-            secrets.hmacSource("transaction-reference-v1:${sms.sender.lowercase(java.util.Locale.ROOT)}", 0, it)
-        }
+        val reference = `in`.financeministry.app.parser.TransactionReference.extract(sms.body)
+        val referenceHash = reference?.let { hashTransactionReference(sms.sender, it) }
         var row = TransactionEntity(id = UUID.randomUUID().toString(), sourceFingerprint = secrets.hmacSource(sms.sender, sms.receivedAtMillis, sms.body),
             sourceType = SourceType.SMS.name, sourceTimestamp = sms.receivedAtMillis, effectiveTimestamp = sms.receivedAtMillis,
             amountMinor = parsed.amountMinor, currency = parsed.currency, direction = parsed.direction.name, status = parsed.status.name,
@@ -293,14 +306,24 @@ class TransactionRepository(private val context: Context, private val namespace:
         db().runInTransaction {
             val adjustment = row.transactionType in listOf("Refund", "Reversal")
             if (adjustment) {
-                val originals = referenceHash?.let(dao::byReference).orEmpty().filter {
-                    it.sourceType == "SMS" && !it.isUserCorrected && it.status == "Successful" && it.direction == "Debit" &&
-                        it.transactionType !in listOf("Refund", "Reversal", "SelfTransfer") && it.reviewState == "AutoRecorded" &&
-                        it.amountMinor == row.amountMinor && it.currency == row.currency &&
-                        it.maskedAccountHint != null && it.maskedAccountHint == row.maskedAccountHint &&
-                        it.channel != "Unknown" && it.channel == row.channel && it.sourceTimestamp <= row.sourceTimestamp &&
-                        dao.linkedTo(it.id).isEmpty()
+                // Legacy evidence can be looked up for the exact old sender only. Existing
+                // hashes and user corrections are never rewritten to manufacture a match.
+                val legacyReferenceHash = reference?.let {
+                    secrets.hmacSource("transaction-reference-v1:${sms.sender.lowercase(java.util.Locale.ROOT)}", 0, it)
                 }
+                val originals = listOfNotNull(referenceHash, legacyReferenceHash)
+                    .flatMap(dao::byReference).distinctBy { it.id }.filter {
+                        it.sourceType == "SMS" && !it.isUserCorrected && it.status == "Successful" && it.direction == "Debit" &&
+                            it.transactionType !in listOf("Refund", "Reversal", "SelfTransfer") && it.reviewState == "AutoRecorded" &&
+                            it.duplicateOfId == null &&
+                            it.amountMinor == row.amountMinor && it.currency == row.currency &&
+                            it.maskedAccountHint != null && it.maskedAccountHint == row.maskedAccountHint &&
+                            it.channel != "Unknown" && it.channel == row.channel &&
+                            (it.paymentSourceId == null || row.paymentSourceId == null || it.paymentSourceId == row.paymentSourceId) &&
+                            it.sourceTimestamp > 0 && it.sourceTimestamp <= row.sourceTimestamp &&
+                            row.sourceTimestamp - it.sourceTimestamp <= 30L * 24 * 60 * 60 * 1000 &&
+                            dao.linkedTo(it.id).isEmpty()
+                    }
                 val validAdjustment = parsed.decision == ParseDecision.Record &&
                     ((row.transactionType == "Refund" && row.direction == "Credit" && row.status == "Successful") ||
                         (row.transactionType == "Reversal" && row.status == "Reversed"))
@@ -318,10 +341,12 @@ class TransactionRepository(private val context: Context, private val namespace:
     }
 
     suspend fun save(input: ManualInput, id: String? = null, newId: String = UUID.randomUUID().toString(),
-        rememberedRule: RememberCategoryRule? = null): String = locked {
+        rememberedRule: RememberCategoryRule? = null, expectedUpdatedAt: Long? = null): String = locked {
         input.validate()
         val dao = db().transactions()
         val old = id?.let { requireNotNull(dao.get(it)) { "This transaction no longer exists." } }
+        require(old?.reviewState != ReviewState.Dismissed.name) { "Restore this alert to Review before editing it." }
+        require(expectedUpdatedAt == null || old?.updatedAt == expectedUpdatedAt) { "This record changed. Reopen it before saving." }
         require(categoryExists(dao, input.category.trim()) || old?.category == input.category.trim()) { "Choose an available category." }
         require(old == null || !dao.hasActiveFinancialMatch(old.id)) { "Undo the match decision in Review before editing this transaction." }
         input.paymentSourceId?.let { sourceId ->
@@ -329,7 +354,7 @@ class TransactionRepository(private val context: Context, private val namespace:
             require(source.channel == input.channel.name) { "The payment source does not support this payment method." }
             require(source.active || old?.paymentSourceId == sourceId) { "Choose an active payment source." }
         }
-        val now = System.currentTimeMillis()
+        val now = maxOf(System.currentTimeMillis(), old?.let { Math.addExact(it.updatedAt, 1) } ?: 0L)
         var row = TransactionEntity(id = old?.id ?: newId, sourceFingerprint = old?.sourceFingerprint,
             sourceType = old?.sourceType ?: SourceType.Manual.name, sourceTimestamp = old?.sourceTimestamp ?: input.timestamp,
             effectiveTimestamp = input.timestamp, amountMinor = input.amountMinor(), currency = old?.currency ?: "INR",
@@ -381,9 +406,12 @@ class TransactionRepository(private val context: Context, private val namespace:
     /** Labels never confirm a payment or change its parsed financial fields. */
     suspend fun classify(id: String, category: String, ownership: SpendingOwnership,
         group: String = "", share: String = "", repaid: String = "", repaymentExpected: Boolean = true,
-        rememberedRule: RememberCategoryRule? = null, groupShares: List<MemberShareInput>? = null) = locked {
+        rememberedRule: RememberCategoryRule? = null, groupShares: List<MemberShareInput>? = null,
+        expectedUpdatedAt: Long? = null) = locked {
         val dao = db().transactions()
         val old = requireNotNull(dao.get(id)) { "This transaction no longer exists." }
+        require(old.reviewState != ReviewState.Dismissed.name) { "Restore this alert to Review before editing it." }
+        require(expectedUpdatedAt == null || old.updatedAt == expectedUpdatedAt) { "This record changed. Reopen it before saving." }
         require(categoryExists(dao, category.trim()) || old.category == category.trim()) { "Choose an available category." }
         require(!dao.hasActiveFinancialMatch(id)) { "Undo the match decision in Review before editing this transaction." }
         val amount = requireNotNull(old.amountMinor) { "Review the amount first using Edit all details." }
@@ -391,7 +419,7 @@ class TransactionRepository(private val context: Context, private val namespace:
             old.effectiveTimestamp, TransactionType.Other, category = category, ownership = ownership,
             groupLabel = group, personalShare = share, repaid = repaid, repaymentExpected = repaymentExpected)
         input.validate()
-        val now = System.currentTimeMillis()
+        val now = maxOf(System.currentTimeMillis(), Math.addExact(old.updatedAt, 1))
         val type = if (ownership == SpendingOwnership.SelfTransfer) "SelfTransfer"
             else if (old.transactionType == "SelfTransfer") "Other" else old.transactionType
         val row = old.copy(category = category.trim(), ownership = ownership.name,

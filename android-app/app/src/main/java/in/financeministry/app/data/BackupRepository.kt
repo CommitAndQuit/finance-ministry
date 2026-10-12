@@ -13,13 +13,13 @@ import java.math.BigInteger
 class BackupPreview internal constructor(internal val data: String, internal val eraseGeneration: Long,
     val transactionCount: Int, val repaymentCount: Int, val sourceCount: Int, val ruleCount: Int,
     val budgetCount: Int, val recurringReminderCount: Int, val createdAt: Long,
-    val memberCount: Int = 0, val groupShareCount: Int = 0)
+    val memberCount: Int = 0, val groupShareCount: Int = 0, val groupPresetCount: Int = 0)
 class PreparedBackup internal constructor(val bytes: ByteArray, val revision: Long)
 data class RestoreResult(val settingsApplied: Boolean)
 
 // Parent-before-child order; reverse order deletes safely within the restore transaction.
-internal val backupTables = listOf("payment_sources", "import_batches", "local_members", "transactions", "corrections", "group_shares", "repayments", "category_rules", "match_decisions", "budgets", "recurring_reminders")
-private val backupPreferences = setOf("preferred_name", "onboarding_complete", "notifications", "review_reminder_hour", "review_reminder_minute")
+internal val backupTables = listOf("payment_sources", "import_batches", "local_members", "group_presets", "group_preset_members", "transactions", "corrections", "group_shares", "repayments", "category_rules", "match_decisions", "budgets", "recurring_reminders")
+private val backupPreferences = setOf("preferred_name", "onboarding_complete", "notifications", "review_reminder_hour", "review_reminder_minute", "appearance")
 
 private fun TransactionRepository.installationId(): String = preferences.getString("installation_id", null)
     ?: UUID.randomUUID().toString().also { check(preferences.edit().putString("installation_id", it).commit()) }
@@ -58,7 +58,7 @@ suspend fun TransactionRepository.createEncryptedBackup(password: CharArray): By
 
 suspend fun TransactionRepository.prepareBackup(password: CharArray): PreparedBackup = withLedger { db ->
     val data = backupData(db)
-    val plain = JSONObject().put("format", 2).put("schema", 8).put("createdAt", System.currentTimeMillis())
+    val plain = JSONObject().put("format", 2).put("schema", 9).put("createdAt", System.currentTimeMillis())
         .put("origin", installationId()).put("fingerprintHistoryRequiresReview", db.transactions().metadata("foreign_restore") == "true")
         .put("data", data).toString().toByteArray(Charsets.UTF_8)
     try {
@@ -107,7 +107,8 @@ suspend fun TransactionRepository.previewBackup(encrypted: ByteArray, password: 
         tables.getJSONArray("repayments").length(), tables.getJSONArray("payment_sources").length(),
         tables.getJSONArray("category_rules").length(), tables.getJSONArray("budgets").length(),
         tables.getJSONArray("recurring_reminders").length(), root.getLong("createdAt"),
-        tables.getJSONArray("local_members").length(), tables.getJSONArray("group_shares").length())
+        tables.getJSONArray("local_members").length(), tables.getJSONArray("group_shares").length(),
+        tables.getJSONArray("group_presets").length())
 }
 
 suspend fun TransactionRepository.hasBackupData(): Boolean = withLedger { db -> hasBackupData(db) }
@@ -217,7 +218,12 @@ private fun validateBackup(root: JSONObject, db: FinanceDatabase) {
         }
         oldTables.put("local_members", JSONArray()).put("group_shares", JSONArray()); root.put("schema", 8)
     }
-    require(root.optInt("format") == 2 && root.optInt("schema") == 8 && root.optLong("createdAt") > 0 && root.optString("origin").length in 1..80) {
+    if (root.optInt("format") == 2 && root.optInt("schema") == 8) {
+        val oldTables = root.getJSONObject("data").getJSONObject("tables")
+        require(!oldTables.has("group_presets") && !oldTables.has("group_preset_members")) { "Unexpected legacy saved group table." }
+        oldTables.put("group_presets", JSONArray()).put("group_preset_members", JSONArray()); root.put("schema", 9)
+    }
+    require(root.optInt("format") == 2 && root.optInt("schema") == 9 && root.optLong("createdAt") > 0 && root.optString("origin").length in 1..80) {
         "Unsupported backup version. Your ledger was not changed."
     }
     val data = root.getJSONObject("data")
@@ -322,6 +328,7 @@ private fun validateBackup(root: JSONObject, db: FinanceDatabase) {
         require(amount > 0 && r.getString("method") in setOf("Legacy", "Cash", "Linked") && (r.isNull("receivedAt") || r.getLong("receivedAt") > 0)) { "Invalid repayment." }
         require(r.getString("method") == "Legacy" || !r.isNull("receivedAt")) { "Dated repayment is missing its date." }
         require(expense.getString("direction") == "Debit" && expense.getString("ownership") in setOf("ForOther", "Group") && expense.getLong("repaymentExpected") == 1L) { "Invalid repayment expense." }
+        require(expense.getString("reviewState") != "Dismissed") { "Excluded alerts cannot have repayment links." }
         val principal = expense.optLong("amountMinor", 0) - expense.optLong("personalShareMinor", expense.optLong("amountMinor", 0))
         val total = (expenseTotals[r.getString("expenseId")] ?: BigInteger.ZERO) + BigInteger.valueOf(amount)
         require(total <= BigInteger.valueOf(principal)) { "Repayment exceeds the expense share." }
@@ -329,7 +336,7 @@ private fun validateBackup(root: JSONObject, db: FinanceDatabase) {
         if (!r.isNull("incomingId")) {
             val incoming = requireNotNull(transactions[r.getString("incomingId")]) { "Repayment credit is missing." }
             require(incoming.getString("direction") == "Credit" && incoming.getString("status") == "Successful" &&
-                incoming.getString("reviewState") != "NeedsReview" && incoming.getString("transactionType") !in setOf("SelfTransfer", "CardRepayment", "Refund", "Reversal") &&
+                incoming.getString("reviewState") in setOf("AutoRecorded", "Confirmed") && incoming.getString("transactionType") !in setOf("SelfTransfer", "CardRepayment", "Refund", "Reversal") &&
                 incoming.getString("ownership") != "SelfTransfer" && incoming.isNull("duplicateOfId") && incoming.optString("currency") == "INR") { "Repayment must link to eligible money in." }
             require(r.getString("method") != "Legacy" && r.getLong("receivedAt") == incoming.getLong("effectiveTimestamp")) { "Repayment date does not match its receipt." }
             if (r.getString("method") == "Cash") require(incoming.getString("sourceType") == "Manual" && incoming.getString("channel") == "CashManual") { "Invalid cash receipt." }
@@ -347,6 +354,7 @@ private fun validateBackup(root: JSONObject, db: FinanceDatabase) {
     require(prefs.keys().asSequence().all { it in backupPreferences }) { "Unsupported backup preference." }
     for (key in prefs.keys()) when (key) {
         "preferred_name" -> require(prefs.get(key) is String && prefs.getString(key).length <= 40)
+        "appearance" -> require(prefs.get(key) is String && prefs.getString(key) in setOf("System", "Light", "Dark")) { "Invalid appearance preference." }
         "review_reminder_hour" -> require(prefs.get(key) is Number && prefs.getInt(key) in 0..23)
         "review_reminder_minute" -> require(prefs.get(key) is Number && prefs.getInt(key) in 0..59)
         else -> require(prefs.get(key) is Boolean)
@@ -367,6 +375,7 @@ suspend fun TransactionRepository.csvReport(start: Long, end: Long): String = wi
         r.amountMinor == null || r.amountMinor <= 0 -> "Missing or invalid amount"
         r.status != "Successful" -> "Status: ${r.status}"
         r.reviewState == "NeedsReview" -> "Needs review"
+        r.reviewState == "Dismissed" -> "Not a transaction"
         r.transactionType == "CardRepayment" -> "Card bill settlement"
         r.transactionType == "SelfTransfer" || r.ownership == "SelfTransfer" -> "Self transfer"
         r.direction !in listOf("Debit", "Credit") -> "Unknown or transfer direction"

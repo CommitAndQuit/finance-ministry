@@ -6,6 +6,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import `in`.financeministry.app.ui.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -16,11 +22,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import `in`.financeministry.app.data.*
 import `in`.financeministry.app.core.model.transactionCategories
 import `in`.financeministry.app.feature.TransactionForm
@@ -48,15 +57,26 @@ fun money(minor: BigInteger): String {
 }
 fun transactionTime(millis: Long): String = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(millis))
 
-private data class CategoryDrilldownSummary(val category: String, val share: BigInteger, val gross: BigInteger,
-    val count: Int, val through: LocalDate)
-
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?, refreshGeneration: Int = 0,
     reviewRequestGeneration: Int = 0, addRequestGeneration: Int = 0, optionalToolRequest: String? = null,
     quickRequest: Boolean = false, consumeOptionalToolRequest: () -> Unit = {}, consumeRequest: () -> Unit) {
+    LocalLedgerTheme(repository.preferences) {
+        LedgerContent(repository, request, refreshGeneration, reviewRequestGeneration, addRequestGeneration,
+            optionalToolRequest, quickRequest, consumeOptionalToolRequest, consumeRequest)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun LedgerContent(repository: TransactionRepository, request: Pair<String, Boolean>?, refreshGeneration: Int,
+    reviewRequestGeneration: Int, addRequestGeneration: Int, optionalToolRequest: String?,
+    quickRequest: Boolean, consumeOptionalToolRequest: () -> Unit, consumeRequest: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val displayLocale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     val scope = rememberCoroutineScope()
     val revision by repository.revision.collectAsState()
     var snapshot by remember { mutableStateOf<LedgerSnapshot?>(null) }
@@ -75,6 +95,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     var disclosure by remember { mutableStateOf(false) }
     var eraseDialog by remember { mutableStateOf(false) }
     var deleteDialog by remember { mutableStateOf(false) }
+    var excludeReview by remember { mutableStateOf<TransactionEntity?>(null) }
     var cardBillDialog by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var handledReviewRequest by remember { mutableIntStateOf(0) }
@@ -110,6 +131,8 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     var loading by remember { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
     var settingsSection by rememberSaveable { mutableStateOf<String?>(null) }
+    var advancedSettings by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(settings) { if (!settings) advancedSettings = false }
     var showInsights by rememberSaveable { mutableStateOf(false) }
     var showRepayments by rememberSaveable { mutableStateOf(false) }
     var showBatch by rememberSaveable { mutableStateOf(false) }
@@ -133,9 +156,13 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     var paymentSources by remember { mutableStateOf(emptyList<PaymentSourceEntity>()) }
     var availableCategories by remember { mutableStateOf(transactionCategories) }
     var showSummaryDetails by rememberSaveable { mutableStateOf(false) }
+    var showMonthPicker by rememberSaveable { mutableStateOf(false) }
+    var owedCountLabel by remember { mutableStateOf("0 people") }
+    var saveFeedback by remember { mutableStateOf<String?>(null) }
+    var backupDismissedAt by remember { mutableLongStateOf(repository.preferences.getLong("backup_reminder_dismissed_at",0)) }
+    LaunchedEffect(saveFeedback) { if(saveFeedback!=null) { kotlinx.coroutines.delay(3500);saveFeedback=null } }
     var showFilters by remember { mutableStateOf(false) }
-    var showResultsTotals by remember { mutableStateOf(false) }
-    var categorySummary by remember { mutableStateOf<CategoryDrilldownSummary?>(null) }
+    var resultsTotalsSnapshot by remember { mutableStateOf<LedgerSnapshot?>(null) }
     var showSourcePicker by remember { mutableStateOf(false) }
     var reviewWarning by remember { mutableStateOf(false) }
     var draftPurposeFilter by remember { mutableStateOf("All") }
@@ -147,7 +174,10 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     var draftSearch by remember { mutableStateOf("") }
     var preferredName by remember { mutableStateOf(repository.preferences.getString("preferred_name", "").orEmpty()) }
     var preferredNameDraft by rememberSaveable { mutableStateOf(preferredName) }
-    val ledgerListState = rememberLazyListState()
+    val homeListState = rememberLazyListState()
+    val activityListState = rememberLazyListState()
+    val reviewListState = rememberLazyListState()
+    val ledgerListState = when(destination) { "Transactions" -> activityListState; "Review" -> reviewListState; else -> homeListState }
     BackHandler(enabled = settings && !form && selectedId == null) {
         if (!busy) { if (settingsSection != null) settingsSection = null else settings = false }
     }
@@ -163,6 +193,15 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
     }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notificationAvailable = `in`.financeministry.app.sms.TransactionNotifications.available(context)
+    }
+    fun changeCapture() {
+        if (captureEnabled) { repository.preferences.edit().putBoolean("sms_disclosure", false).apply(); captureEnabled = false }
+        else if (smsSettingsRequired && repository.preferences.getBoolean("sms_disclosure", false)) openSmsSettings()
+        else disclosure = true
+    }
+    fun changeNotifications(enabled: Boolean) {
+        notifications = enabled; repository.preferences.edit().putBoolean("notifications", enabled).apply()
+        if (enabled && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
     LaunchedEffect(refreshGeneration) {
         captureEnabled = repository.captureAllowed()
@@ -193,8 +232,8 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                 personalSpend = monthSummary.personalSpend, paidForOthers = monthSummary.paidForOthers,
                 outstandingRepayments = monthSummary.outstandingRepayments,
                 selectedMonth = monthSummary.selectedMonth)
-                else repository.snapshot(if (destination == "Overview") 0 else offset,
-                    if (destination == "Overview") "All" else filter,
+                else repository.snapshot(if (destination != "Transactions") 0 else offset,
+                    if (destination != "Transactions") "All" else filter,
                     java.time.YearMonth.parse(selectedMonth).atDay(1), LocalDate.now(),
                     if (destination == "Transactions") search else "")
             snapshot = result
@@ -208,25 +247,12 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             reviewCount = repository.reviewCount()
             reviewAvailable = reviewCount > 0
             categoryConflictCount = repository.categoryConflicts().size
+            owedCountLabel = `in`.financeministry.app.feature.owedBalanceCountLabel(
+                RepaymentAccounting.people(repository.repaymentSummary(java.time.YearMonth.parse(selectedMonth).atDay(1))))
             if (result.rows.isEmpty() && offset > 0) offset = maxOf(0, offset - 100)
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { error = "Cannot open encrypted storage. Existing data was preserved. Erase all only if you intend to delete it." }
         finally { loading = false }
-    }
-    LaunchedEffect(revision, selectedMonth, filter, destination) {
-        categorySummary = null
-        val category = categoryParts(filter).singleOrNull()
-        if (destination == "Transactions" && category != null && filter == combinedFilter("All", "All", "Debit", listOf(category))) {
-            try {
-                val insight = repository.spendingInsights(java.time.YearMonth.parse(selectedMonth).atDay(1))
-                val records = insight.transactions.filter { it.category == category }
-                categorySummary = CategoryDrilldownSummary(category,
-                    insight.categories.firstOrNull { it.category == category }?.amount ?: BigInteger.ZERO,
-                    records.fold(BigInteger.ZERO) { total, row -> total + BigInteger.valueOf(row.amountMinor ?: 0) },
-                    records.size, insight.lastDay)
-            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (_: Exception) { categorySummary = null }
-        }
     }
     LaunchedEffect(reviewRequestGeneration, busy) {
         if (busy) return@LaunchedEffect
@@ -304,104 +330,269 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
         return
     }
     Surface(Modifier.fillMaxSize()) {
-        val ledgerScroll = rememberScrollState()
-        LaunchedEffect(settings, settingsSection) { ledgerScroll.scrollTo(0) }
-        val pageModifier = Modifier.safeDrawingPadding().fillMaxSize().padding(16.dp)
-        Column(if (!settings && selected != null && !form) pageModifier.verticalScroll(ledgerScroll) else pageModifier,
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (selectedId == null) FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                val largeText = androidx.compose.ui.platform.LocalConfiguration.current.fontScale >= 1.5f
-                val homeTitle = preferredName.trim().takeIf { it.isNotEmpty() }?.let { "Hi, $it" } ?: "Your overview"
-                Text(if (settings) settingsSection ?: "Settings" else when (destination) {
-                    "Overview" -> homeTitle
-                    "Transactions" -> "Transactions"
-                    else -> "Review"
-                }, style = if (largeText) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
-                    modifier = if (largeText) Modifier.fillMaxWidth() else Modifier.weight(1f))
-                TextButton(onClick = {
-                    when {
-                        settings && settingsSection != null -> settingsSection = null
-                        settings -> { settings = false; settingsSection = null; destination = "Overview" }
-                        destination == "Transactions" -> {
-                            showBatch = !showBatch
-                            batchSelectedIds = arrayListOf()
-                        }
-                        else -> { settings = true; settingsSection = null }
-                    }
-                }, enabled = !busy && (destination != "Transactions" || showBatch || snapshot?.rows?.isNotEmpty() == true)) {
-                    Text(if (settings && settingsSection != null) "Back" else if (settings) "Home" else if (destination == "Transactions") (if (showBatch) "Done" else "Select") else "Settings")
+      Box(Modifier.fillMaxSize()) {
+        val pageModifier = Modifier.safeDrawingPadding().fillMaxSize()
+        Column(pageModifier) {
+            Row(Modifier.fillMaxWidth().heightIn(min=72.dp).padding(start=20.dp,end=20.dp,top=12.dp,bottom=8.dp),
+                verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                    if(destination=="Overview") Text("Finance Ministry",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(when(destination) {
+                        "Overview" -> preferredName.trim().takeIf {it.isNotEmpty()}?.let {"Hi, $it"} ?: "Your ledger"
+                        "Transactions" -> "Activity"
+                        "People" -> "People"
+                        else -> "Review"
+                    },style=MaterialTheme.typography.headlineMedium)
+                }
+                run {
+                    IconButton(onClick={settings=true;settingsSection=null},modifier=Modifier.semantics {contentDescription="Settings"}) {LedgerIcon("gear")}
+                    FilledIconButton(onClick={selected=null;selectedId=null;quickForm=false;form=true},modifier=Modifier.size(48.dp).semantics {contentDescription="Add transaction"},shape=RoundedCornerShape(14.dp)) {LedgerIcon("plus")}
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (selectedId != null && selected == null) { Text("Loading transaction…") }
-            else if (selected != null) {
-                val row = selected!!
-                Text(money(row.amountMinor), style = MaterialTheme.typography.headlineSmall)
-                Text("${`in`.financeministry.app.feature.transactionFlowLabel(row)} · ${friendly(row.status)}")
-                if (row.transactionType == "CardRepayment") Text("Pays an existing card balance. Excluded from spending and money-in/out totals; purchases count when they happen.", style = MaterialTheme.typography.bodySmall)
-                Text("${friendly(row.transactionType)} · ${friendly(row.channel)} · ${friendly(row.sourceType)}")
-                paymentSources.firstOrNull { it.id == row.paymentSourceId }?.let { Text("Payment source: ${it.nickname}${if (it.active) "" else " (inactive)"}", style = MaterialTheme.typography.bodySmall) }
-                if (row.paymentSourceId == null && paymentSources.any { it.active && it.channel == row.channel })
-                    TextButton(onClick = { showSourcePicker = true }) { Text("Choose payment source") }
-                transactionLabels(row)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                if (row.duplicateOfId != null) Text("Excluded duplicate · the other record is counted", style = MaterialTheme.typography.bodyMedium)
-                selectedMatch?.let { decision ->
-                    Text(if (decision.action == "SelfTransfer") "Confirmed own-account transfer · excluded from spending and money-in/out totals."
-                        else "Part of a confirmed duplicate pair. Both records are retained.", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { selected = null; selectedId = null; showMatches = true; matchHistory = true }) { Text("Review match decision") }
-                    Text("Undo the match decision before editing this record.", style = MaterialTheme.typography.bodySmall)
+            if(destination=="People") {
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    `in`.financeministry.app.feature.PeopleContent(repository,java.time.YearMonth.parse(selectedMonth).atDay(1),
+                        onChanged={saveFeedback="Repayment recorded. Your spending is unchanged."},
+                        onOpenTransaction={selected=null;selectedId=it})
                 }
-                row.groupLabel?.let { Text("${if (row.ownership == "Group") "Group" else "For"}: $it", style = MaterialTheme.typography.bodySmall) }
-                repaymentSummary(row, snapshot?.reversedOriginalIds.orEmpty())?.let { (label, owed) ->
-                    Text("$label: ${money(owed)}", style = MaterialTheme.typography.bodySmall)
+                LedgerNavigation(destination,reviewCount) {next->if(next!=destination){destination=next;offset=0;snapshot=null}}
+            } else {
+                // Lazy layout can evaluate its item provider during measurement. Capture every
+                // structural input together so its count and keys cannot see different revisions.
+                val listDestination = destination
+                val listSnapshot = snapshot
+                val listLoading = loading
+                val listGuide = showGuide
+                val listOffset = offset
+                val rows = if (listDestination == "Overview") listSnapshot?.rows.orEmpty().take(4)
+                    else listSnapshot?.rows.orEmpty()
+                LazyColumn(Modifier.fillMaxWidth().weight(1f), state = ledgerListState,
+                    contentPadding = PaddingValues(start=20.dp,end=20.dp,bottom=24.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                if (listDestination == "Overview" && listGuide) item {
+                    `in`.financeministry.app.feature.FirstUseGuide(captureEnabled, paymentSources.any { it.active },
+                        repository.preferences.getBoolean("review_reminder", false),
+                        onDone = { finishGuide() },
+                        onAdd = { finishGuide(); selected = null; selectedId = null; form = true },
+                        onOpenSms = { finishGuide(); settings = true; settingsSection = "SMS & messages" },
+                        onOpenSources = { finishGuide(); settings = true; settingsSection = "Payment sources" },
+                        onOpenReminder = { finishGuide(); settings = true; settingsSection = "Review reminders" },
+                        isUpdate = tourIsUpdate,
+                        onChapterChanged = { scope.launch { ledgerListState.scrollToItem(0) } })
                 }
-                if (row.reviewState == "NeedsReview") Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Check this transaction", style = MaterialTheme.typography.titleMedium)
-                        Text(when {
-                            row.amountMinor == null -> "We couldn’t identify a reliable amount. Enter it to finish recording."
-                            row.direction == "Unknown" -> "Choose whether money went out, came in, or moved between accounts."
-                            row.status == "Unknown" -> "Check whether this payment completed before confirming."
-                            else -> "Check the details before including this transaction in your totals."
-                        })
+                if (listDestination == "Overview") item {
+                    listSnapshot?.let { data ->
+                        LedgerHomeSummary(data,owedCountLabel,onMonth={showMonthPicker=true},onBreakdown={showSummaryDetails=true},
+                            onPeople={destination="People";offset=0;snapshot=null})
                     }
-                } else Text(friendly(row.reviewState), style = MaterialTheme.typography.bodySmall)
-                Text(transactionTime(row.effectiveTimestamp))
-                if (row.sourceType == "SMS" && !row.isUserCorrected) Text("Date from SMS delivery, not the date written in the message. Delayed alerts may appear in a later month; Edit lets you correct the date.", style = MaterialTheme.typography.bodySmall)
-                row.linkedOriginalId?.let { originalId ->
-                    TextButton(onClick = { selected = null; selectedId = originalId }) { Text("View linked original transaction") }
-                    Text("Linked by matching reference, account, channel and full amount.", style = MaterialTheme.typography.bodySmall)
+                    if(repository.preferences.getBoolean("capture_error",false)) LedgerReviewCue("A message could not be recorded. Add it manually if needed.",{selected=null;selectedId=null;form=true},"info")
+                    else if(!captureEnabled && repository.preferences.getBoolean("sms_permission_requested",false)) {
+                        val smsAllowed = context.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        LedgerReviewCue(if (smsAllowed) "SMS capture is paused. Manage settings" else "SMS permission blocked. Manage settings",
+                            {settings=true;settingsSection="SMS & messages"},"info")
+                    }
+                    if(reviewAvailable) LedgerReviewCue("$reviewCount payment${if(reviewCount==1)"" else "s"} needs a quick check",{destination="Review";offset=0;snapshot=null})
+                    val now=System.currentTimeMillis()
+                    val lastBackup=repository.preferences.getLong("last_backup_at",0)
+                    if((listSnapshot?.resultCount ?: 0)>=20 && now-lastBackup>30L*24*60*60*1000 && now-backupDismissedAt>7L*24*60*60*1000) {
+                        Row(Modifier.fillMaxWidth().padding(top=12.dp),verticalAlignment=Alignment.CenterVertically) {
+                            TextButton(onClick={settings=true;settingsSection="Backup & export"},modifier=Modifier.weight(1f),contentPadding=PaddingValues(0.dp)) {Text("Keep a backup of your ledger",style=MaterialTheme.typography.bodySmall)}
+                            IconButton(onClick={backupDismissedAt=now;repository.preferences.edit().putLong("backup_reminder_dismissed_at",now).apply()},modifier=Modifier.semantics {contentDescription="Dismiss backup reminder"}) {LedgerIcon("close",Modifier.size(16.dp))}
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth().padding(top=19.dp,bottom=5.dp),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                        Text("Recent activity",style=MaterialTheme.typography.titleMedium.copy(fontSize=17.sp))
+                        TextButton(onClick={destination="Transactions";offset=0;snapshot=null},contentPadding=PaddingValues(0.dp)) {Text("View all",style=MaterialTheme.typography.labelMedium);Spacer(Modifier.width(4.dp));LedgerIcon("arrow",Modifier.size(15.dp))}
+                    }
                 }
-                row.counterpartyLabel?.let { Text(it) }; row.maskedAccountHint?.let { Text(it) }; row.userNotes?.let { Text(it) }
-                `in`.financeministry.app.feature.RepaymentHistoryPanel(repository, row,
-                    RepaymentAccounting.eligible(row, snapshot?.reversedOriginalIds.orEmpty()))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (selectedMatch == null && row.direction in listOf("Debit", "Credit") && row.ownership !in listOf("SelfTransfer", "ForOther", "Group") && row.transactionType !in listOf("CardRepayment", "Refund", "Reversal", "SelfTransfer"))
-                        OutlinedButton(onClick = { cardBillDialog = true }) { Text("Mark as card bill payment") }
-                    OutlinedButton(onClick = { quickForm = true; form = true }, enabled = selectedMatch == null) { Text("Category & purpose") }
-                    Button(onClick = { form = true }, enabled = selectedMatch == null) { Text("Edit / confirm") }
-                    OutlinedButton(onClick = { selected = null; selectedId = null }) { Text("Back") }
+                if (listDestination == "Transactions") item {
+                    if (showCategoryTip) Text("Open a transaction, then choose Category & purpose to save it or remember the merchant for future payments.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        LedgerMonthButton(java.time.YearMonth.parse(selectedMonth).format(DateTimeFormatter.ofPattern("MMMM uuuu")), {showMonthPicker=true})
+                        TextButton(onClick = {
+                            focusManager.clearFocus(); keyboardController?.hide()
+                            draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); draftDirectionFilter = directionPart(filter); draftPaymentKindFilter = paymentKindPart(filter); draftCategories = categoryParts(filter); draftSourceIds = sourceParts(filter); draftSearch = search; showFilters = true
+                        }, contentPadding=PaddingValues(0.dp), modifier = Modifier.semantics { contentDescription = "Filter transactions" }) { LedgerIcon("filter",Modifier.size(15.dp));Spacer(Modifier.width(4.dp));Text("Filters",style=MaterialTheme.typography.labelMedium) }
+                    }
+                    LedgerSearchField(search, { search = it.take(80); offset = 0; snapshot = null },
+                        onSearch = { focusManager.clearFocus(); keyboardController?.hide() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 13.dp))
+                    FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {listOf("All" to "All","Debit" to "Money out","Credit" to "Money in").forEach { (value,label) ->
+                        LedgerChoiceChip(directionPart(filter)==value,{filter=combinedFilter(purposePart(filter),originPart(filter),value,categoryParts(filter),sourceParts(filter),paymentKindPart(filter));offset=0;snapshot=null},label={Text(label)},shape=RoundedCornerShape(10.dp),modifier=Modifier.heightIn(min=48.dp))
+                    }}
+                    if(showBatch) TextButton(onClick={showBatch=false;batchSelectedIds=arrayListOf()},contentPadding=PaddingValues(0.dp)) {Text("Done selecting",style=MaterialTheme.typography.labelMedium)}
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val detailFilters = combinedFilter(purposePart(filter), originPart(filter), "All", categoryParts(filter), sourceParts(filter), paymentKindPart(filter))
+                        if (detailFilters != "All") {
+                            LedgerChoiceChip(selected = true, onClick = {
+                                focusManager.clearFocus(); keyboardController?.hide()
+                                draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); draftDirectionFilter = directionPart(filter); draftPaymentKindFilter = paymentKindPart(filter); draftCategories = categoryParts(filter); draftSourceIds = sourceParts(filter); draftSearch = search; showFilters = true
+                            }, label = { Text(filterLabel(filter, paymentSources)) })
+                        }
+                        if (filter != "All" || search.isNotBlank()) TextButton(onClick = { filter = "All"; search = ""; offset = 0; snapshot = null },
+                            modifier = Modifier.semantics { contentDescription = "Clear transaction filters" }) { Text("Clear") }
+                    }
+                    snapshot?.let {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text("${it.resultCount} transaction${if (it.resultCount == 1L) "" else "s"}", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick = {
+                                focusManager.clearFocus();keyboardController?.hide();resultsTotalsSnapshot=it
+                            },contentPadding=PaddingValues(0.dp)) { Text("Totals",style=MaterialTheme.typography.labelMedium);Spacer(Modifier.width(4.dp));LedgerIcon("down",Modifier.size(15.dp)) }
+                        }
+                    }
+                    if (showBatch) TextButton(onClick = {
+                        batchSelectedIds = ArrayList(snapshot?.rows.orEmpty().map { it.id })
+                    }) { Text("Select visible records") }
                 }
-                TextButton(onClick = { deleteDialog = true }) { Text("Delete transaction") }
-            } else if (settings) {
-                Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(ledgerScroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (listDestination == "Review") item {
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
+                        Text("All dates · $reviewCount remaining",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick={matchHistory=false;showMatches=true}) {Text("Possible matches")}
+                    }
+                    Text("A quick check keeps your totals accurate. These payments are excluded until you confirm.", style = MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (categoryConflictCount > 0) TextButton(onClick = { settings = true; settingsSection = "Category rules" }) {
+                        Text("$categoryConflictCount category choices needed · separate from financial review")
+                    }
+                }
+                if (listLoading) item { Text("Loading transactions…") }
+                else if (rows.isEmpty()) item {
+                    if (destination == "Transactions") Column(Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val filtered = filter != "All" || search.isNotBlank()
+                        Text(if (filtered) "No matching transactions" else "No transactions yet", style = MaterialTheme.typography.titleMedium)
+                        Text(if (filtered) "Try another month or clear the filters." else "Add one yourself, or enable SMS capture in Settings.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (filtered) TextButton(onClick = { filter = "All"; search = ""; offset = 0; snapshot = null }) { Text("Clear filters") }
+                        else TextButton(onClick = { selected = null; selectedId = null; form = true }) { Text("Add transaction") }
+                    } else if(destination=="Review") Column(Modifier.fillMaxWidth().padding(vertical=48.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)) {LedgerIcon("check",Modifier.size(36.dp),MaterialTheme.colorScheme.primary);Text("All caught up",style=MaterialTheme.typography.titleLarge);Text("No saved payments need checking.",style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant);TextButton(onClick={destination="Overview";offset=0;snapshot=null}) {Text("Back to Home")}}
+                    else Text("No transactions here yet. Add one manually or enable new SMS capture in Settings.",style=MaterialTheme.typography.bodyMedium)
+                }
+                rows.groupBy { Instant.ofEpochMilli(it.effectiveTimestamp).atZone(ZoneId.systemDefault()).toLocalDate() }.forEach { (day, rows) ->
+                    if(listDestination!="Review") item("day-$day") { Text(day.format(DateTimeFormatter.ofPattern("d MMMM",displayLocale)).uppercase(displayLocale), modifier=Modifier.padding(top=14.dp,bottom=2.dp),style = MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                    items(rows, key = { it.id }) { row ->
+                        if(listDestination=="Review") LedgerReviewCard(row,
+                            onConfirm={selected=row;selectedId=row.id;quickForm=false;form=true;showCategoryTip=false},onExclude={excludeReview=row})
+                        else {
+                        val selecting=showBatch && destination=="Transactions"
+                        LedgerTransactionRow(row,paymentSources.firstOrNull {it.id==row.paymentSourceId}?.nickname,
+                            onOpen={if(selecting) batchSelectedIds=ArrayList(if(row.id in batchSelectedIds)batchSelectedIds-row.id else batchSelectedIds+row.id)
+                                else {selected=row;selectedId=row.id;showCategoryTip=false}},
+                            onClassify={selected=row;selectedId=row.id;quickForm=row.reviewState!="NeedsReview";form=true;showCategoryTip=false},
+                            selecting=selecting,selected=row.id in batchSelectedIds)
+                        }
+                    }
+                }
+                if (listDestination != "Overview" && (listOffset > 0 || listSnapshot?.hasOlder == true)) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { offset = maxOf(0, offset - 100); snapshot = null }, enabled = !loading && offset > 0) { Text("Newer") }
+                    Text("Page ${offset / 100 + 1}", Modifier.padding(top = 12.dp))
+                    TextButton(onClick = { offset += 100; snapshot = null }, enabled = !loading && snapshot?.hasOlder == true && offset <= Int.MAX_VALUE - 201) { Text("Older") }
+                }
+                }
+                }
+                if (showBatch && destination == "Transactions") {
+                    `in`.financeministry.app.feature.BatchCleanupActions(repository, snapshot?.rows.orEmpty(), batchSelectedIds) {
+                        batchSelectedIds = arrayListOf()
+                    }
+                }
+                LedgerNavigation(destination,reviewCount) { next ->
+                    if (next != destination) { destination = next; offset = 0; snapshot = null }
+                }
+            }
+        }
+        saveFeedback?.let {message->
+            Surface(Modifier.align(Alignment.BottomCenter).padding(start=16.dp,end=16.dp,bottom=92.dp),shape=RoundedCornerShape(13.dp),color=MaterialTheme.colorScheme.onSurface,contentColor=MaterialTheme.colorScheme.background,shadowElevation=4.dp) {
+                Text(message,Modifier.padding(16.dp),style=MaterialTheme.typography.bodySmall)
+            }
+        }
+      }
+    }
+    if (settings && !form && selectedId == null) {
+        val latestSettingsBusy by rememberUpdatedState(busy)
+        val settingsSheet = rememberModalBottomSheetState(skipPartiallyExpanded = true,
+            confirmValueChange = { it != SheetValue.Hidden || !latestSettingsBusy })
+        fun backFromSettings() {
+            if (!busy) {
+                if (settingsSection == null) settings = false
+                else { settingsSection = null; scope.launch { settingsSheet.show() } }
+            }
+        }
+        val settingsScroll = key(settingsSection) { rememberScrollState() }
+        ModalBottomSheet(onDismissRequest = ::backFromSettings, sheetState = settingsSheet, dragHandle = null,
+            sheetGesturesEnabled = !busy, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+            LedgerSheetSystemBars()
+            Column(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 9.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (settingsSection != null) IconButton(onClick = { settingsSection = null }, enabled = !busy,
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Back to settings" }) {
+                        LedgerIcon("back")
+                    }
+                    Text(when (settingsSection) {
+                        null -> "Your app"
+                        "Backup & export" -> "Backup & restore"
+                        "SMS & messages" -> "SMS & notifications"
+                        else -> settingsSection.orEmpty()
+                    }, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = { settings = false; settingsSection = null }, enabled = !busy,
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Close settings" }) { LedgerIcon("close") }
+                }
+                Column(Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(settingsScroll)
+                    .padding(start = 20.dp, end = 20.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(if (settingsSection == null) 0.dp else 8.dp)) {
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 when (settingsSection) {
                     null -> {
-                        Text("Everyday tools and data controls", style = MaterialTheme.typography.bodyMedium)
-                        SettingsRow("Backup & export", "Encrypted backups, restore and readable reports") { settingsSection = "Backup & export" }
+                        Text("A simple ledger, on your terms.", style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 20.dp))
+                        SettingsToggleRow("SMS capture", when {
+                            captureEnabled -> "On · supported bank alerts"
+                            smsSettingsRequired -> "SMS permission blocked · manual entry still works"
+                            else -> "Paused · manual entry still works"
+                        }, captureEnabled, !busy) { changeCapture() }
+                        SettingsToggleRow("Recording notifications", if (notifications && !notificationAvailable)
+                            "Blocked by Android · manage below" else "Quick access to category and purpose", notifications, !busy, ::changeNotifications)
+                        val appearance = LocalLedgerAppearance.current
+                        SettingsRow("Appearance", "${appearance.name} theme", icon = "moon") { settingsSection = "Appearance" }
+                        SettingsRow("Backup & restore", "Protect your local ledger") { settingsSection = "Backup & export" }
+                        SettingsRow("Payment sources", "Bank accounts, cards & UPI") { settingsSection = "Payment sources" }
+                        SettingsRow("More settings", "Rules, reminders, privacy and other tools", icon = if (advancedSettings) "back" else "down") {
+                            advancedSettings = !advancedSettings
+                        }
+                        if (advancedSettings) {
+                        SettingsRow("SMS & notifications", "Permissions, capture health and history import") { settingsSection = "SMS & messages" }
                         SettingsRow("Category rules", "Remember merchant categories for future payments") { settingsSection = "Category rules" }
-                        SettingsRow("SMS & notifications", if (captureEnabled) "New SMS capture is on" else "Capture is off · Manual entry still works") { settingsSection = "SMS & messages" }
+                        SettingsRow("Review reminders", if (repository.preferences.getBoolean("review_reminder", false)) "Daily reminder is on" else "Off") { settingsSection = "Review reminders" }
                         SettingsRow("Optional tools", "Budgets, payment reminders and home-screen widget") { settingsSection = "Optional tools" }
-                        Text("MORE SETTINGS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        SettingsRow("Payment sources", if (paymentSources.count { it.active } == 0) "Add your UPI, accounts and cards" else "${paymentSources.count { it.active }} active") { settingsSection = "Payment sources" }
                         SettingsRow("Personalization", if (preferredName.isBlank()) "Set an optional home greeting" else "Home says Hi, $preferredName") {
                             preferredNameDraft = preferredName; settingsSection = "Personalization"
                         }
-                        SettingsRow("Review reminders", if (repository.preferences.getBoolean("review_reminder", false)) "Daily reminder is on" else "Off") { settingsSection = "Review reminders" }
                         SettingsRow("Data and privacy", "Local storage, erasure and recovery") { settingsSection = "Data & privacy" }
                         SettingsRow("App tour", "Explore features and optional setup again") {
                             showGuide = true; settings = false; settingsSection = null; destination = "Overview"
                             scope.launch { ledgerListState.scrollToItem(0) }
+                        }
+                        }
+                        Text("Finance Ministry is an independent app.\nYour ledger stays on this phone.",
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 20.dp))
+                    }
+                    "Appearance" -> {
+                        Text("Choose a theme, or follow your phone. This choice stays on your device and is included in encrypted backups.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val appearance = LocalLedgerAppearance.current
+                        LedgerAppearance.entries.forEach { mode ->
+                            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(
+                                role = androidx.compose.ui.semantics.Role.RadioButton,
+                                onClick = { repository.preferences.edit().putString(APPEARANCE_KEY, mode.name).apply() })
+                                .semantics { this.selected = appearance == mode }, verticalAlignment = Alignment.CenterVertically) {
+                                Text(mode.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                RadioButton(appearance == mode, onClick = null)
+                            }
                         }
                     }
                     "Personalization" -> {
@@ -417,11 +608,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                     "SMS & messages" -> {
                         Text("Record supported bank alerts as transactions. You can always add or correct a transaction yourself.")
                         TextButton(onClick = { settingsSection = "Capture health" }) { Text("Capture health") }
-                        Button(onClick = {
-                            if (captureEnabled) { repository.preferences.edit().putBoolean("sms_disclosure", false).apply(); captureEnabled = false }
-                            else if (smsSettingsRequired && repository.preferences.getBoolean("sms_disclosure", false)) openSmsSettings()
-                            else disclosure = true
-                        }, enabled = !busy) { Text(if (captureEnabled) "Pause SMS capture" else if (smsSettingsRequired) "Open SMS permission settings" else "Enable SMS capture") }
+                        Button(onClick = ::changeCapture, enabled = !busy) { Text(if (captureEnabled) "Pause SMS capture" else if (smsSettingsRequired) "Open SMS permission settings" else "Enable SMS capture") }
                         Text(when {
                             captureEnabled -> "SMS capture active"
                             context.checkSelfPermission(Manifest.permission.RECEIVE_SMS) != android.content.pm.PackageManager.PERMISSION_GRANTED -> "SMS permission not allowed · Manual entry still works"
@@ -430,10 +617,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                         if (smsSettingsRequired) Text("Android is no longer showing the SMS permission prompt. Allow SMS in Android settings, then return here. Manual entry still works.", style = MaterialTheme.typography.bodySmall)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Recording notifications", Modifier.padding(top = 12.dp))
-                            Switch(checked = notifications, onCheckedChange = {
-                                notifications = it; repository.preferences.edit().putBoolean("notifications", it).apply()
-                                if (it && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            })
+                            Switch(checked = notifications, onCheckedChange = ::changeNotifications, enabled = !busy)
                         }
                         if (notifications && !notificationAvailable) {
                             Text("Android notifications are blocked. SMS capture can still record transactions.", style = MaterialTheme.typography.bodySmall)
@@ -470,253 +654,109 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                         `in`.financeministry.app.feature.PrivacyPanel(onErase = { eraseDialog = true }, busy = busy)
                     }
                 }
-                }
-            } else {
-                // Lazy layout can evaluate its item provider during measurement. Capture every
-                // structural input together so its count and keys cannot see different revisions.
-                val listDestination = destination
-                val listSnapshot = snapshot
-                val listLoading = loading
-                val listGuide = showGuide
-                val listOffset = offset
-                val rows = if (listDestination == "Overview") listSnapshot?.rows.orEmpty().take(4)
-                    else listSnapshot?.rows.orEmpty()
-                LazyColumn(Modifier.fillMaxWidth().weight(1f), state = ledgerListState,
-                    contentPadding = PaddingValues(bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (listDestination == "Overview" && listGuide) item {
-                    `in`.financeministry.app.feature.FirstUseGuide(captureEnabled, paymentSources.any { it.active },
-                        repository.preferences.getBoolean("review_reminder", false),
-                        onDone = { finishGuide() },
-                        onAdd = { finishGuide(); selected = null; selectedId = null; form = true },
-                        onOpenSms = { finishGuide(); settings = true; settingsSection = "SMS & messages" },
-                        onOpenSources = { finishGuide(); settings = true; settingsSection = "Payment sources" },
-                        onOpenReminder = { finishGuide(); settings = true; settingsSection = "Review reminders" },
-                        isUpdate = tourIsUpdate,
-                        onChapterChanged = { scope.launch { ledgerListState.scrollToItem(0) } })
-                }
-                if (listDestination == "Overview") item {
-                    snapshot?.let {
-                        Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer)) {
-                            Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                TextButton(onClick = { selectedMonth = java.time.YearMonth.parse(selectedMonth).minusMonths(1).toString(); offset = 0; snapshot = null },
-                                    modifier = Modifier.semantics { contentDescription = "Previous month" }) { Text("‹") }
-                                Column(Modifier.weight(1f), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                                    Text(java.time.YearMonth.parse(selectedMonth).format(DateTimeFormatter.ofPattern("MMMM uuuu")), style = MaterialTheme.typography.titleMedium)
-                                    Text("Whole month", style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f))
-                                }
-                                TextButton(onClick = { selectedMonth = java.time.YearMonth.parse(selectedMonth).plusMonths(1).toString(); offset = 0; snapshot = null },
-                                    modifier = Modifier.semantics { contentDescription = "Next month" }) { Text("›") }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                Text("Your spending", style = MaterialTheme.typography.labelMedium)
-                                IconButton(onClick = { showSummaryDetails = true }, modifier = Modifier.semantics { contentDescription = "How totals work" }) { Text("ⓘ") }
-                            }
-                            Text(money(it.personalSpend), style = MaterialTheme.typography.headlineMedium)
-                            Text("Personal, family and your share of group spending", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.12f))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                                Column(Modifier.weight(1f)) { Text("Money out · month", style = MaterialTheme.typography.labelSmall); Text(money(it.debit), style = MaterialTheme.typography.titleSmall) }
-                                Column(Modifier.weight(1f)) { Text("Money in · month", style = MaterialTheme.typography.labelSmall); Text(money(it.credit), style = MaterialTheme.typography.titleSmall) }
-                            }
-                            if (showSummaryDetails) {
-                                AlertDialog(onDismissRequest = { showSummaryDetails = false }, title = { Text("How totals work") },
-                                    text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text("Money in and out cover the selected month. They exclude self transfers, card repayments, failed or unconfirmed payments, and reversed originals.\n\nYour spending includes personal and family payments, gifts, and only your share of group payments. Refunds are separate money-in entries; they do not subtract from Your spending.\n\nStill owed includes unpaid amounts across all dates; the smaller line shows how much remains unpaid from payments in the selected month.\n\nSMS dates use delivery time unless corrected. Missing or delayed alerts can affect month totals. These are recorded transaction totals, not a verified account balance.") } },
-                                    confirmButton = { TextButton(onClick = { showSummaryDetails = false }) { Text("Got it") } })
-                            }
-                        } }
-                    }
-                }
-                if (listDestination == "Overview") item {
-                    snapshot?.let {
-                        Card(Modifier.fillMaxWidth().clickable { showRepayments = true }.semantics { contentDescription = "Open repayments" }, shape = MaterialTheme.shapes.large,
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
-                            Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                    Column {
-                                        Text("Still owed to you", style = MaterialTheme.typography.titleSmall)
-                                        Text("Outstanding across all dates", style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    Text(money(it.outstandingRepayments), style = MaterialTheme.typography.titleMedium)
-                                }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                Row(Modifier.fillMaxWidth().semantics { contentDescription = "Outstanding from selected month" },
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                    Text("From ${it.selectedMonth.format(DateTimeFormatter.ofPattern("MMMM"))} payments",
-                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(money(it.selectedMonthOutstandingRepayments), style = MaterialTheme.typography.titleSmall)
-                                }
-                            } }
-                    }
-                    if (repository.preferences.getBoolean("capture_error", false)) Text("A message could not be recorded. Add it manually if needed.", color = MaterialTheme.colorScheme.error)
-                    if (reviewAvailable) Card(Modifier.fillMaxWidth().clickable { destination = "Review"; offset = 0; snapshot = null }
-                        .semantics { contentDescription = "Open review queue" }, shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer)) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("$reviewCount payment${if (reviewCount == 1) "" else "s"} needs review →", style = MaterialTheme.typography.titleSmall)
-                            Text("Excluded from totals until confirmed", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-                if (listDestination == "Overview") item {
-                    TextButton(onClick = { showInsights = true },
-                        modifier = Modifier.semantics { contentDescription = "Open spending breakdown" }) { Text("Breakdown") }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("Recent activity", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { destination = "Transactions"; offset = 0; snapshot = null }) { Text("View all") }
-                    }
-                }
-                if (listDestination == "Transactions") item {
-                    if (showCategoryTip) Text("Open a transaction, then choose Category & purpose to save it or remember the merchant for future payments.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text(java.time.YearMonth.parse(selectedMonth).format(DateTimeFormatter.ofPattern("MMMM uuuu")), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = {
-                            draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); draftDirectionFilter = directionPart(filter); draftPaymentKindFilter = paymentKindPart(filter); draftCategories = categoryParts(filter); draftSourceIds = sourceParts(filter); draftSearch = search; showFilters = true
-                        }, modifier = Modifier.semantics { contentDescription = "Filter transactions" }) { Text("Filters") }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (filter != "All") {
-                            FilterChip(selected = true, onClick = {
-                                draftPurposeFilter = purposePart(filter); draftOriginFilter = originPart(filter); draftDirectionFilter = directionPart(filter); draftPaymentKindFilter = paymentKindPart(filter); draftCategories = categoryParts(filter); draftSourceIds = sourceParts(filter); draftSearch = search; showFilters = true
-                            }, label = { Text(filterLabel(filter, paymentSources)) })
-                        }
-                        if (search.isNotBlank()) FilterChip(selected = true, onClick = { search = ""; offset = 0; snapshot = null }, label = { Text("Search: $search") })
-                        if (filter != "All" || search.isNotBlank()) TextButton(onClick = { filter = "All"; search = ""; offset = 0; snapshot = null },
-                            modifier = Modifier.semantics { contentDescription = "Clear transaction filters" }) { Text("Clear") }
-                    }
-                    snapshot?.let {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Text("${it.resultCount} transaction${if (it.resultCount == 1L) "" else "s"}", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton(onClick = { showResultsTotals = true }) { Text("Results totals") }
-                        }
-                    }
-                    categorySummary?.let { totals ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Your share · ${totals.category}", style = MaterialTheme.typography.labelSmall)
-                                Text(money(totals.share), style = MaterialTheme.typography.titleSmall)
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text("Money out · ${totals.category}", style = MaterialTheme.typography.labelSmall)
-                                Text(money(totals.gross), style = MaterialTheme.typography.titleSmall)
-                            }
-                        }
-                        Text("${totals.count} confirmed spending records through ${totals.through.format(DateTimeFormatter.ofPattern("d MMM"))}; other matching records may still need review.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (showBatch) TextButton(onClick = {
-                        batchSelectedIds = ArrayList(snapshot?.rows.orEmpty().map { it.id })
-                    }) { Text("Select visible records") }
-                }
-                if (listDestination == "Review") item {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = true, onClick = {}, label = { Text("Needs details") })
-                        FilterChip(selected = false, onClick = { matchHistory = false; showMatches = true }, label = { Text("Possible matches") })
-                    }
-                    Text("All dates · $reviewCount remaining", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                    Text("Review queue", style = MaterialTheme.typography.titleLarge)
-                    Text("Check uncertain details before a payment enters your totals.", style = MaterialTheme.typography.bodySmall)
-                    if (categoryConflictCount > 0) TextButton(onClick = { settings = true; settingsSection = "Category rules" }) {
-                        Text("$categoryConflictCount category choices needed · separate from financial review")
-                    }
-                }
-                if (listLoading) item { Text("Loading transactions…") }
-                else if (rows.isEmpty()) item {
-                    if (destination == "Transactions") Column(Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val filtered = filter != "All" || search.isNotBlank()
-                        Text(if (filtered) "No matching transactions" else "No transactions yet", style = MaterialTheme.typography.titleMedium)
-                        Text(if (filtered) "Try another month or clear the filters." else "Add one yourself, or enable SMS capture in Settings.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (filtered) TextButton(onClick = { filter = "All"; search = ""; offset = 0; snapshot = null }) { Text("Clear filters") }
-                        else TextButton(onClick = { selected = null; selectedId = null; form = true }) { Text("Add transaction") }
-                    } else Text(if (destination == "Review") "You’re all caught up. No saved transactions need review."
-                        else "No transactions here yet. Add one manually or enable new SMS capture in Settings.")
-                }
-                rows.groupBy { Instant.ofEpochMilli(it.effectiveTimestamp).atZone(ZoneId.systemDefault()).toLocalDate() }.forEach { (day, rows) ->
-                    item("day-$day") { Text(day.format(DateTimeFormatter.ofPattern("d MMM yyyy")), style = MaterialTheme.typography.labelLarge) }
-                    items(rows, key = { it.id }) { row ->
-                        val selectingRow = showBatch && destination == "Transactions"
-                        Row(Modifier.fillMaxWidth().clickable {
-                            if (selectingRow) batchSelectedIds = ArrayList(if (row.id in batchSelectedIds) batchSelectedIds - row.id else batchSelectedIds + row.id)
-                            else { selected = row; selectedId = row.id; showCategoryTip = false }
-                        }.then(if (selectingRow) Modifier.semantics { contentDescription = "Select ${row.counterpartyLabel ?: row.id}" } else Modifier)
-                            .padding(vertical = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            if (selectingRow) Checkbox(checked = row.id in batchSelectedIds, onCheckedChange = null)
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(row.counterpartyLabel ?: if (row.sourceType == "Manual") "Manual transaction" else "${friendly(row.channel)} transaction",
-                                        style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                                    Text(money(row.amountMinor), style = MaterialTheme.typography.titleSmall)
-                                }
-                                val namedSource = paymentSources.firstOrNull { it.id == row.paymentSourceId }
-                                Text(buildList {
-                                    add(`in`.financeministry.app.feature.transactionFlowLabel(row))
-                                    transactionLabels(row)?.let(::add)
-                                    namedSource?.nickname?.let(::add)
-                                }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
-                                Text(DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(row.effectiveTimestamp)), style = MaterialTheme.typography.labelSmall)
-                                if (row.ownership == "Group") {
-                                    val personal = row.personalShareMinor ?: row.amountMinor ?: 0
-                                    val debt = repaymentSummary(row, snapshot?.reversedOriginalIds.orEmpty())
-                                    Text("Your share ${money(personal)}${debt?.let { " · ${it.first} ${money(it.second)}" }.orEmpty()}", style = MaterialTheme.typography.bodySmall)
-                                } else if (row.ownership == "ForOther") {
-                                    repaymentSummary(row, snapshot?.reversedOriginalIds.orEmpty())?.let { (label, owed) ->
-                                        Text("$label ${money(owed)}", style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                                if (row.paymentSourceId == null && paymentSources.any { it.active && it.channel == row.channel })
-                                    Text("Payment source needs selection", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                                if (row.reviewState == "NeedsReview" || row.status != "Successful")
-                                    Text("${friendly(row.status)} · ${friendly(row.reviewState)}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
-                                else if (row.isUserCorrected) Text("Edited by you", style = MaterialTheme.typography.labelSmall)
-                                if (row.categoryNeedsReview) Text("Category needs your choice · conflicting rules", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                                if (row.duplicateOfId != null) Text("Excluded duplicate · retained in history", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                HorizontalDivider(Modifier.padding(top = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                            }
-                        }
-                    }
-                }
-                if (listDestination != "Overview" && (listOffset > 0 || listSnapshot?.hasOlder == true)) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { offset = maxOf(0, offset - 100); snapshot = null }, enabled = !loading && offset > 0) { Text("Newer") }
-                    Text("Page ${offset / 100 + 1}", Modifier.padding(top = 12.dp))
-                    TextButton(onClick = { offset += 100; snapshot = null }, enabled = !loading && snapshot?.hasOlder == true && offset <= Int.MAX_VALUE - 201) { Text("Older") }
-                }
-                }
-                }
-                if (showBatch && destination == "Transactions") {
-                    `in`.financeministry.app.feature.BatchCleanupActions(repository, snapshot?.rows.orEmpty(), batchSelectedIds) {
-                        batchSelectedIds = arrayListOf()
-                    }
-                } else if (destination != "Review") {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        FloatingActionButton(onClick = { selected = null; selectedId = null; form = true },
-                            modifier = Modifier.semantics { contentDescription = "Add transaction" },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 2.dp)) { Text("+ Add", modifier = Modifier.padding(horizontal = 8.dp)) }
-                    }
-                }
-                LedgerNavigation(destination) { next ->
-                    if (next != destination) { destination = next; offset = 0; snapshot = null }
+
                 }
             }
         }
+    }
+    if(showSummaryDetails && snapshot!=null) MonthlyMathSheet(repository,snapshot!!,{showSummaryDetails=false},{showSummaryDetails=false;showInsights=true})
+    excludeReview?.let {row->AlertDialog(onDismissRequest={if(!busy)excludeReview=null},title={Text("Exclude this alert?")},
+        text={Text("It will leave Review and stay excluded from totals. The record is kept in Activity; open its details to restore it to Review.")},
+        confirmButton={TextButton(enabled=!busy,onClick={
+            busy=true;scope.launch {
+                try {repository.dismissReview(row.id,row.updatedAt);excludeReview=null;snapshot=null;saveFeedback="Alert excluded. Totals are unchanged."}
+                catch(cancelled:kotlinx.coroutines.CancellationException) {throw cancelled}
+                catch(e:IllegalArgumentException) {error=e.message;excludeReview=null}
+                catch(_:Exception) {error="Could not exclude this alert. Close and retry.";excludeReview=null}
+                finally {busy=false}
+            }
+        }) {Text(if(busy)"Saving…" else "Exclude alert")}},dismissButton={TextButton(enabled=!busy,onClick={excludeReview=null}) {Text("Keep in review")}})}
+    if(showMonthPicker) ModalBottomSheet(onDismissRequest={showMonthPicker=false},dragHandle=null,containerColor=MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxWidth().padding(20.dp).navigationBarsPadding(),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            Text("Choose a month",style=MaterialTheme.typography.titleLarge)
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                IconButton(onClick={selectedMonth=java.time.YearMonth.parse(selectedMonth).minusMonths(1).toString();offset=0;snapshot=null},modifier=Modifier.semantics {contentDescription="Previous month"}) {LedgerIcon("back")}
+                Text(java.time.YearMonth.parse(selectedMonth).format(DateTimeFormatter.ofPattern("MMMM uuuu")),Modifier.weight(1f),style=MaterialTheme.typography.titleMedium)
+                IconButton(onClick={selectedMonth=java.time.YearMonth.parse(selectedMonth).plusMonths(1).toString();offset=0;snapshot=null},modifier=Modifier.semantics {contentDescription="Next month"}) {LedgerIcon("arrow")}
+            }
+            TextButton(onClick={selectedMonth=java.time.YearMonth.now().toString();offset=0;snapshot=null}) {Text("Current month")}
+            Button(onClick={showMonthPicker=false},modifier=Modifier.fillMaxWidth().heightIn(min=50.dp)) {Text("Use this month")}
+        }
+    }
+    val detailsRow = selected
+    if (detailsRow != null && !form) TransactionDetailsSheet(
+        onDismiss = { if (!busy) { selected = null; selectedId = null } },
+        primaryLabel = if (detailsRow.reviewState == "Dismissed") "Done" else "Edit / confirm",
+        primaryEnabled = !busy && (detailsRow.reviewState == "Dismissed" || selectedMatch == null),
+        dismissEnabled = !busy,
+        onPrimary = {
+            if (detailsRow.reviewState == "Dismissed" || selectedMatch != null) { selected = null; selectedId = null }
+            else form = true
+        },
+    ) {
+        val row = detailsRow
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        row.counterpartyLabel?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+        Text(money(row.amountMinor), style = MaterialTheme.typography.headlineSmall)
+        Text("${`in`.financeministry.app.feature.transactionFlowLabel(row)} · ${friendly(row.status)}")
+        if (row.transactionType == "CardRepayment") Text("Pays an existing card balance. Excluded from spending and money-in/out totals; purchases count when they happen.", style = MaterialTheme.typography.bodySmall)
+        Text("${friendly(row.transactionType)} · ${friendly(row.channel)} · ${friendly(row.sourceType)}")
+        paymentSources.firstOrNull { it.id == row.paymentSourceId }?.let { Text("Payment source: ${it.nickname}${if (it.active) "" else " (inactive)"}", style = MaterialTheme.typography.bodySmall) }
+        if (row.paymentSourceId == null && paymentSources.any { it.active && it.channel == row.channel })
+            TextButton(onClick = { showSourcePicker = true }) { Text("Choose payment source") }
+        transactionLabels(row)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (row.duplicateOfId != null) Text("Excluded duplicate · the other record is counted", style = MaterialTheme.typography.bodyMedium)
+        if (row.reviewState == "Dismissed") {
+            Text("Marked not a transaction · excluded from all money totals. The original evidence is retained.",style=MaterialTheme.typography.bodySmall)
+            TextButton(onClick={
+                busy=true
+                scope.launch {
+                    try {repository.restoreDismissedReview(row.id,row.updatedAt);selected=null;selectedId=null;destination="Review";offset=0;snapshot=null;saveFeedback="Returned to review. Totals are unchanged."}
+                    catch(cancelled:kotlinx.coroutines.CancellationException) {throw cancelled}
+                    catch(e:IllegalArgumentException) {error=e.message}
+                    catch(_:Exception) {error="Could not restore this alert. Close and retry."}
+                    finally {busy=false}
+                }
+            },enabled=!busy) {Text("Restore to review")}
+        }
+        selectedMatch?.let { decision ->
+            Text(if (decision.action == "SelfTransfer") "Confirmed own-account transfer · excluded from spending and money-in/out totals."
+                else "Part of a confirmed duplicate pair. Both records are retained.", style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { selected = null; selectedId = null; showMatches = true; matchHistory = true }) { Text("Review match decision") }
+            Text("Undo the match decision before editing this record.", style = MaterialTheme.typography.bodySmall)
+        }
+        row.groupLabel?.let { Text("${if (row.ownership == "Group") "Group" else "For"}: $it", style = MaterialTheme.typography.bodySmall) }
+        repaymentSummary(row, snapshot?.reversedOriginalIds.orEmpty())?.let { (label, owed) ->
+            Text("$label: ${money(owed)}", style = MaterialTheme.typography.bodySmall)
+        }
+        if (row.reviewState == "NeedsReview") Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Check this transaction", style = MaterialTheme.typography.titleMedium)
+                Text(when {
+                    row.amountMinor == null -> "We couldn’t identify a reliable amount. Enter it to finish recording."
+                    row.direction == "Unknown" -> "Choose whether money went out, came in, or moved between accounts."
+                    row.status == "Unknown" -> "Check whether this payment completed before confirming."
+                    else -> "Check the details before including this transaction in your totals."
+                })
+            }
+        } else Text(friendly(row.reviewState), style = MaterialTheme.typography.bodySmall)
+        Text(transactionTime(row.effectiveTimestamp))
+        if (row.sourceType == "SMS" && !row.isUserCorrected) Text("Date from the SMS record’s timestamp, not the date written in its text. If the date is wrong, Edit lets you correct it.", style = MaterialTheme.typography.bodySmall)
+        row.linkedOriginalId?.let { originalId ->
+            TextButton(onClick = { selected = null; selectedId = originalId }) { Text("View linked original transaction") }
+            Text("Linked by matching reference, account, channel and full amount.", style = MaterialTheme.typography.bodySmall)
+        }
+        row.maskedAccountHint?.let { Text(it, style = MaterialTheme.typography.bodySmall) }; row.userNotes?.let { Text(it) }
+        `in`.financeministry.app.feature.RepaymentHistoryPanel(repository, row,
+            RepaymentAccounting.eligible(row, snapshot?.reversedOriginalIds.orEmpty()))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (row.reviewState != "Dismissed") {
+            if (selectedMatch == null && row.direction in listOf("Debit", "Credit") && row.ownership !in listOf("SelfTransfer", "ForOther", "Group") && row.transactionType !in listOf("CardRepayment", "Refund", "Reversal", "SelfTransfer"))
+                OutlinedButton(onClick = { cardBillDialog = true }) { Text("Mark as card bill payment") }
+            OutlinedButton(onClick = { quickForm = true; form = true }, enabled = selectedMatch == null) { Text("Category & purpose") }
+            }
+        }
+        TextButton(onClick = { deleteDialog = true }) { Text("Delete transaction") }
     }
     if (form && (selectedId == null || selected != null)) ModalBottomSheet(
         onDismissRequest = { if (!busy) { if (dirtyForm) formDismissWarning = true else { form = false; selected = null; selectedId = null } } },
@@ -724,10 +764,12 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
         // Scrolling the form at its top must not drag/dismiss the editor window.
         sheetGesturesEnabled = false,
         dragHandle = null,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         TransactionForm(repository, selected,
-            onDone = { dirtyForm = false; quickForm = false; form = false; selected = null; selectedId = null; offset = 0; error = null },
-            onDirtyChange = { dirtyForm = it }, quickOnly = quickForm)
+            onDone = { saveFeedback=if(quickForm)"Category and purpose saved." else if(selected?.reviewState=="NeedsReview")"Payment confirmed. Your totals are updated." else "Payment saved.";dirtyForm = false; quickForm = false; form = false; selected = null; selectedId = null; offset = 0; error = null },
+            onDirtyChange = { dirtyForm = it }, quickOnly = quickForm,
+            onCancel = {dirtyForm=false;quickForm=false;form=false;selected=null;selectedId=null})
     }
     if (requestWarning) AlertDialog(onDismissRequest = { requestWarning = false; consumeRequest() },
         title = { Text("Open another transaction?") }, text = { Text("Your current changes have not been saved.") },
@@ -786,15 +828,7 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             try { repository.delete(selected!!.id); selected = null; selectedId = null } catch (_: Exception) { error = "Delete failed. Please retry." }
             finally { busy = false; deleteDialog = false }
         } } }, enabled = !busy) { Text("Delete") } }, dismissButton = { TextButton(onClick = { deleteDialog = false }, enabled = !busy) { Text("Cancel") } })
-    if (showResultsTotals) AlertDialog(onDismissRequest = { showResultsTotals = false },
-        title = { Text("Matching transaction totals") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Money out ${money(snapshot?.resultDebit ?: BigInteger.ZERO)}")
-            Text("Money in ${money(snapshot?.resultCredit ?: BigInteger.ZERO)}")
-            Text("For the selected month and filters. Only eligible recorded payments count; these are not your bank balance or your personal spending share.",
-                style = MaterialTheme.typography.bodySmall)
-        } },
-        confirmButton = { TextButton(onClick = { showResultsTotals = false }) { Text("Close") } })
+    resultsTotalsSnapshot?.let { totals -> MatchingTotalsSheet(totals) {resultsTotalsSnapshot=null} }
     if (cardBillDialog && selected != null) AlertDialog(onDismissRequest = { if (!busy) cardBillDialog = false },
         title = { Text("Mark as card bill payment?") },
         text = { Text("Only use this for paying your own credit card bill, not a purchase, refund or cashback. This record will be excluded from spending and money-in/out totals. Its amount, status and review state stay unchanged. You can change the type back in Edit / confirm.") },
@@ -805,26 +839,53 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             finally { busy = false }
         } }) { Text("Mark bill payment") } },
         dismissButton = { TextButton(enabled = !busy, onClick = { cardBillDialog = false }) { Text("Cancel") } })
-    if (showFilters) AlertDialog(onDismissRequest = { showFilters = false }, title = { Text("Filter transactions") }, text = {
-        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (showFilters) LedgerFiltersSheet(
+        categorySummary = draftCategories.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "All categories",
+        moreFiltersInitially = draftPurposeFilter != "All" || draftOriginFilter != "All" ||
+            draftPaymentKindFilter != "All" || draftSourceIds.isNotEmpty(),
+        onDismiss = { showFilters = false },
+        onApply = {
+            focusManager.clearFocus(); keyboardController?.hide()
+            val knownSourceIds = paymentSources.map { it.id }.toSet()
+            val next = combinedFilter(draftPurposeFilter, draftOriginFilter, draftDirectionFilter, draftCategories,
+                draftSourceIds.filter { it in knownSourceIds }, draftPaymentKindFilter)
+            if (next != filter || draftSearch != search || offset != 0) { filter = next; search = draftSearch; offset = 0; snapshot = null }
+            showFilters = false
+        },
+        onClear = {
+            focusManager.clearFocus(); keyboardController?.hide()
+            draftPurposeFilter = "All"; draftOriginFilter = "All"; draftDirectionFilter = "All"; draftPaymentKindFilter = "All"; draftCategories = emptyList(); draftSourceIds = emptyList(); draftSearch = ""
+            if (filter != "All" || search.isNotBlank() || offset != 0) { filter = "All"; search = ""; offset = 0; snapshot = null }
+            showFilters = false
+        },
+        categoryChoices = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                availableCategories.forEach { category ->
+                    LedgerChoiceChip(selected = category in draftCategories, onClick = {
+                        draftCategories = if (category in draftCategories) draftCategories - category else draftCategories + category
+                    }, label = { Text(category) }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(10.dp))
+                }
+            }
+        }, advancedChoices = {
+            TextButton(onClick={focusManager.clearFocus();keyboardController?.hide();showFilters=false;showBatch=true;batchSelectedIds=arrayListOf()}) {Text("Select transactions")}
             OutlinedTextField(draftSearch, { draftSearch = it.take(80) }, label = { Text("Search transactions") },
                 placeholder = { Text("Merchant or label") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             HorizontalDivider()
             Text("Money flow", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("Debit", "Credit").forEach { option ->
-                    FilterChip(selected = draftDirectionFilter == option, onClick = {
+                    LedgerChoiceChip(selected = draftDirectionFilter == option, onClick = {
                         draftDirectionFilter = if (draftDirectionFilter == option) "All" else option
-                    }, label = { Text(if (option == "Debit") "Money out" else "Money in") })
+                    }, label = { Text(if (option == "Debit") "Money out" else "Money in") }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(10.dp))
                 }
             }
             HorizontalDivider()
             Text("Payment type", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("CardBills", "CardCreditsToCheck").forEach { option ->
-                    FilterChip(selected = draftPaymentKindFilter == option, onClick = {
+                    LedgerChoiceChip(selected = draftPaymentKindFilter == option, onClick = {
                         draftPaymentKindFilter = if (draftPaymentKindFilter == option) "All" else option
-                    }, label = { Text(friendlyFilter(option)) })
+                    }, label = { Text(friendlyFilter(option)) }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(10.dp))
                 }
             }
             if (draftPaymentKindFilter == "CardCreditsToCheck") Text("Unclassified card credits in this month. Check each record: some may be cashback or other genuine credits. Nothing is changed automatically.", style = MaterialTheme.typography.bodySmall)
@@ -832,18 +893,18 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
             Text("Purpose", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("Personal", "Family", "ForOthers", "Group", "SelfTransfer").forEach { option ->
-                    FilterChip(selected = draftPurposeFilter == option, onClick = {
+                    LedgerChoiceChip(selected = draftPurposeFilter == option, onClick = {
                         draftPurposeFilter = if (draftPurposeFilter == option) "All" else option
-                    }, label = { Text(friendlyFilter(option)) })
+                    }, label = { Text(friendlyFilter(option)) }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(10.dp))
                 }
             }
             HorizontalDivider()
             Text("Origin and changes", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("Manual", "Edited").forEach { option ->
-                    FilterChip(selected = draftOriginFilter == option, onClick = {
+                    LedgerChoiceChip(selected = draftOriginFilter == option, onClick = {
                         draftOriginFilter = if (draftOriginFilter == option) "All" else option
-                    }, label = { Text(friendlyFilter(option)) })
+                    }, label = { Text(friendlyFilter(option)) }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(10.dp))
                 }
             }
             HorizontalDivider()
@@ -853,35 +914,13 @@ fun LedgerApp(repository: TransactionRepository, request: Pair<String, Boolean>?
                 Text("Choose one or more registered sources.", style = MaterialTheme.typography.bodySmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     paymentSources.sortedWith(compareByDescending<PaymentSourceEntity> { it.active }.thenBy { it.nickname.lowercase() }).forEach { source ->
-                        FilterChip(selected = source.id in draftSourceIds, onClick = {
+                        LedgerChoiceChip(selected = source.id in draftSourceIds, onClick = {
                             draftSourceIds = if (source.id in draftSourceIds) draftSourceIds - source.id else draftSourceIds + source.id
-                        }, label = { Text(source.nickname + if (source.active) "" else " · inactive") })
+                        }, label = { Text(source.nickname + if (source.active) "" else " · inactive") }, modifier = Modifier.heightIn(min = 48.dp), shape = RoundedCornerShape(10.dp))
                     }
                 }
             }
-            HorizontalDivider()
-            Text("Category", style = MaterialTheme.typography.labelLarge)
-            Text("Choose one or more. None selected includes all categories.", style = MaterialTheme.typography.bodySmall)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                availableCategories.forEach { category ->
-                    FilterChip(selected = category in draftCategories, onClick = {
-                        draftCategories = if (category in draftCategories) draftCategories - category else draftCategories + category
-                    }, label = { Text(category) })
-                }
-            }
-        }
-    }, confirmButton = { TextButton(onClick = {
-        val knownSourceIds = paymentSources.map { it.id }.toSet()
-        val next = combinedFilter(draftPurposeFilter, draftOriginFilter, draftDirectionFilter, draftCategories,
-            draftSourceIds.filter { it in knownSourceIds }, draftPaymentKindFilter)
-        if (next != filter || draftSearch != search || offset != 0) { filter = next; search = draftSearch; offset = 0; snapshot = null }
-        showFilters = false
-    }) { Text("Apply") } },
-        dismissButton = { TextButton(onClick = {
-            draftPurposeFilter = "All"; draftOriginFilter = "All"; draftDirectionFilter = "All"; draftPaymentKindFilter = "All"; draftCategories = emptyList(); draftSourceIds = emptyList(); draftSearch = ""
-            if (filter != "All" || search.isNotBlank() || offset != 0) { filter = "All"; search = ""; offset = 0; snapshot = null }
-            showFilters = false
-        }, modifier = Modifier.semantics { contentDescription = "Clear transaction filters" }) { Text("Clear all") } })
+        })
     if (showSourcePicker && selected != null) AlertDialog(
         onDismissRequest = { if (!busy) showSourcePicker = false },
         title = { Text("Choose payment source") },
@@ -949,7 +988,7 @@ private fun friendlyFilter(value: String): String = when (value) {
 }
 
 internal fun repaymentSummary(row: TransactionEntity, reversedOriginalIds: Set<String> = emptySet()): Pair<String, Long>? {
-    if (!row.repaymentExpected || row.duplicateOfId != null) return null
+    if (!row.repaymentExpected || row.duplicateOfId != null || row.reviewState == "Dismissed") return null
     if (row.ownership !in listOf("ForOther", "Group") || row.direction != "Debit" || row.amountMinor == null) return null
     if (row.status in listOf("Failed", "Reversed") || row.transactionType in listOf("SelfTransfer", "CardRepayment", "Refund", "Reversal") || row.id in reversedOriginalIds) return null
     val personal = row.personalShareMinor ?: row.amountMinor
@@ -966,47 +1005,63 @@ private fun transactionLabels(row: TransactionEntity): String? = buildList {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun LedgerNavigation(destination: String, onNavigate: (String) -> Unit) {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    val largeText = androidx.compose.ui.platform.LocalConfiguration.current.fontScale >= 1.5f
-    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val itemModifier = if (largeText) Modifier else Modifier.weight(1f)
-        LedgerNavigationButton("Overview", destination, "Open overview", onNavigate, itemModifier)
-        LedgerNavigationButton("Transactions", destination, "Open transactions", onNavigate, itemModifier)
-        LedgerNavigationButton("Review", destination, "Open review tab", onNavigate, itemModifier)
-    }
-}
-
-@Composable
-private fun LedgerNavigationButton(label: String, destination: String, description: String, onNavigate: (String) -> Unit, modifier: Modifier) {
-    TextButton(onClick = { onNavigate(label) }, modifier = modifier.semantics { contentDescription = description; selected = destination == label },
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(50),
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = if (destination == label) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            containerColor = if (destination == label) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)) {
-        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-            Text(when (label) { "Overview" -> "⌂"; "Transactions" -> "≡"; else -> "✓" }, style = MaterialTheme.typography.labelMedium)
-            Text(
-                text = label,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingsRow(title: String, summary: String, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(summary, style = MaterialTheme.typography.bodySmall)
+internal fun LedgerNavigation(destination:String,reviewCount:Int=0,onNavigate:(String)->Unit) {
+    HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
+    Row(Modifier.fillMaxWidth().heightIn(min=72.dp).padding(start=10.dp,end=10.dp,top=9.dp,bottom=4.dp)) {
+        listOf(Triple("Overview","Home","home"),Triple("Transactions","Activity","list"),Triple("People","People","people"),Triple("Review","Review","review")).forEach { (key,label,icon)->
+            TextButton(onClick={onNavigate(key)},modifier=Modifier.weight(1f).heightIn(min=56.dp).semantics {
+                contentDescription=when(key){"Overview"->"Open home";"Transactions"->"Open activity";"People"->"Open people";else->"Open review tab"}
+                selected=destination==key
+            },contentPadding=PaddingValues(0.dp)) {
+                Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.size(width=38.dp,height=28.dp).background(if(destination==key)MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,RoundedCornerShape(9.dp)),contentAlignment=Alignment.Center) {
+                        LedgerIcon(icon,Modifier.size(22.dp),if(destination==key)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        if(key=="Review" && reviewCount>0) Badge(Modifier.align(Alignment.TopEnd),
+                            containerColor=MaterialTheme.colorScheme.onTertiaryContainer,
+                            contentColor=MaterialTheme.colorScheme.background) {Text(reviewCount.toString(),fontSize=9.sp)}
+                    }
+                    Text(label,style=MaterialTheme.typography.labelSmall.copy(fontSize=10.sp,
+                        fontWeight=if(destination==key)FontWeight.Bold else FontWeight.Normal),color=if(destination==key)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            Text("›", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
         }
-        HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
+    }
+}
+
+@Composable
+private fun SettingsRow(title: String, summary: String, icon: String = "chevron", onClick: () -> Unit) {
+    Column {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = androidx.compose.ui.semantics.Role.Button,
+            onClick = onClick).padding(vertical = 17.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            LedgerIcon(icon, Modifier.size(if (icon == "chevron") 16.dp else 22.dp), MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(title: String, summary: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Column {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(checked, enabled = enabled,
+            role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onChange)
+            .semantics { contentDescription = title }.padding(vertical = 17.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
+                Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Box(Modifier.size(40.dp, 24.dp).background(if (checked) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))) {
+                Box(Modifier.padding(start = if (checked) 19.dp else 3.dp, top = 3.dp).size(18.dp)
+                    .background(if (checked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.surfaceContainer,
+                        androidx.compose.foundation.shape.CircleShape))
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }

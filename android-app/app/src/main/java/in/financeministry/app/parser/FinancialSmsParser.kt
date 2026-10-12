@@ -11,23 +11,32 @@ import java.math.BigInteger
 
 class RuleBasedFinancialSmsParser {
     fun parse(input: IncomingSms): ParseAssessment {
-        val result = parseFields(input)
+        val fields = parseFields(input)
+        // A numeric, absent or implausible origin can be a forwarded/personal
+        // message. Preserve parsed evidence, but do not count it automatically.
+        // Header syntax is not bank authentication, nor an exhaustive bank list.
+        val origin = input.sender.trim()
+        val result = if (fields.decision == ParseDecision.Record &&
+            (!ParserRules.plausibleServiceHeader.matches(origin) || origin.equals("unknown", ignoreCase = true))) {
+            fields.copy(decision = ParseDecision.NeedsReview, confidence = minOf(fields.confidence, 70), ruleId = "unverified_origin")
+        } else fields
         if (result.decision == ParseDecision.Reject) return result
         val transactionText = ParserRules.transactionText(input.body)
         val card = ParserRules.cardSpend.find(transactionText) ?: CardAlertFormats.match(transactionText)
-        val hints = (Regex("""\b(?:a/c|accounts?|cards?)\s+[*xX•]+(\d{4})(?!\d)""", RegexOption.IGNORE_CASE)
+        val bank = BankAlertFormats.match(transactionText)
+        val hints = (Regex("""\b(?:a/c|accounts?|acct\.?|cards?)\s+[*xX•]+(\d{4})(?![A-Za-z0-9])""", RegexOption.IGNORE_CASE)
             .findAll(transactionText).map { "••••${it.groupValues[1]}" }.toList() +
-            listOfNotNull(card?.groups?.get("last4")?.value?.let { "••••$it" })).distinct()
+            listOfNotNull(card?.groups?.get("last4")?.value?.let { "••••$it" }, bank?.groups?.get("last4")?.value?.let { "••••$it" })).distinct()
         val counterparty = if (ParserRules.sentPayment.containsMatchIn(ParserRules.normalized(input.body))) {
             Regex("""(?m)^To ([A-Za-z][A-Za-z .&'-]{0,59})\r?$""").find(input.body)?.groupValues?.get(1)?.trim()
-        } else card?.groups?.get("merchant")?.value?.trim()
+        } else card?.groups?.get("merchant")?.value?.trim() ?: BankAlertFormats.counterparty(transactionText)
         return result.copy(maskedAccountHint = hints.singleOrNull(), counterpartyLabel = counterparty)
     }
 
     private fun parseFields(input: IncomingSms): ParseAssessment {
         // Security instructions are not evidence of the transaction's channel or state.
         val text = ParserRules.normalized(ParserRules.transactionText(input.body))
-        val completed = ParserRules.completedMovement.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.matches(text)
+        val completed = ParserRules.completedMovement.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.matches(text) || BankAlertFormats.match(text) != null
 
         if (ParserRules.otpOrVerification.containsMatchIn(ParserRules.normalized(input.body))) {
             return rejected("otp_or_verification")
@@ -44,7 +53,7 @@ class RuleBasedFinancialSmsParser {
         }
 
         if (
-            (ParserRules.promotion.containsMatchIn(text) || ParserRules.futureOrReminder.containsMatchIn(text)) &&
+            (ParserRules.promotion.containsMatchIn(text) || ParserRules.futureOrReminder.containsMatchIn(text)) && !ParserRules.reversed.containsMatchIn(text) &&
             !completed
         ) {
             return rejected("promotional_or_scheduled")
@@ -111,7 +120,7 @@ class RuleBasedFinancialSmsParser {
 
     private fun detectDirection(text: String): Direction {
         if (ParserRules.ownAccounts.containsMatchIn(text)) return Direction.Transfer
-        val debit = ParserRules.debit.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.debit(text) || CardBillPaymentFormats.debit(text)
+        val debit = ParserRules.debit.containsMatchIn(text) || ParserRules.sentPayment.containsMatchIn(text) || ParserRules.cardSpend.containsMatchIn(text) || CardAlertFormats.hasMovement(text) || MovementTemplates.debit(text) || CardBillPaymentFormats.debit(text) || BankAlertFormats.match(text) != null
         val credit = ParserRules.credit.containsMatchIn(text) || MovementTemplates.credit(text) || CardBillPaymentFormats.credit(text)
         if (debit && credit) return if (ParserRules.isIciciAccountDebit(text)) Direction.Debit else Direction.Unknown
         if (debit) return Direction.Debit
@@ -142,6 +151,7 @@ class RuleBasedFinancialSmsParser {
         Regex("\\bimps\\b").containsMatchIn(text) -> Channel.IMPS
         Regex("\\bneft\\b").containsMatchIn(text) -> Channel.NEFT
         Regex("\\brtgs\\b").containsMatchIn(text) -> Channel.RTGS
+        BankAlertFormats.netBanking.containsMatchIn(text) -> Channel.BankTransfer
         ParserRules.ownAccounts.containsMatchIn(text) -> Channel.BankTransfer
         else -> Channel.Unknown
     }
@@ -221,6 +231,6 @@ class RuleBasedFinancialSmsParser {
         counterpartyLabel = null,
         confidence = confidence,
         ruleId = ruleId,
-        parserVersion = 8,
+        parserVersion = 10,
     )
 }

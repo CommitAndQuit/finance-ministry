@@ -17,13 +17,13 @@ class RepaymentUiTest {
         val before = runBlocking { r.snapshot().rows.map { it.id }.toSet() }
         try {
             rule.onNodeWithContentDescription("Add transaction").performClick()
-            rule.onNodeWithText("Amount (INR)").performTextInput("123.45")
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("123.45")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
-            rule.onNodeWithText("Money out").performClick()
+            rule.onNode(hasText("Money out") and hasClickAction()).performClick()
             rule.onNodeWithText("For someone else").performScrollTo().performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("No · gift or treat").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("No · gift or treat").performScrollTo().performClick()
-            rule.onNodeWithText("Save transaction").performClick()
+            rule.onNode(hasText("Add payment") and hasClickAction()).performClick()
             rule.waitUntil(15000) { runBlocking { r.snapshot().rows.any { it.id !in before } } }
             val saved = runBlocking { r.snapshot().rows.single { it.id !in before } }
             assertFalse(saved.repaymentExpected)
@@ -39,24 +39,26 @@ class RepaymentUiTest {
             groupLabel = "Test flatmates", personalShare = "1000")) }
         var receiptId: String? = null
         try {
+            rule.waitUntil(15000) {rule.onAllNodesWithContentDescription("Open repayments").fetchSemanticsNodes().isNotEmpty()}
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Open repayments"))
             rule.onNodeWithContentDescription("Open repayments").performClick()
+            rule.onNodeWithContentDescription("Open people").assertIsSelected()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Test flatmates").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Test flatmates").performClick()
-            rule.onNodeWithText("Repayment test dinner").performClick()
-            rule.onNodeWithText("Record money received").performScrollTo().performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performTextInput("500")
+            rule.onNodeWithText("Expense & repayment history").performClick()
+            rule.onNodeWithText("Record repayment").performScrollTo().performClick()
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextInput("500")
             rule.onNodeWithText("Received cash").performScrollTo().performClick()
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().performClick()
             rule.waitUntil(15000) { runBlocking { r.repaymentsFor(id).size == 1 } }
             val repayment = runBlocking { r.repaymentsFor(id).single() }
             receiptId = repayment.incomingId
             assertEquals(50000L, repayment.amountMinor)
             assertEquals(150000L, RepaymentAccounting.owed(runBlocking { r.get(id)!! }))
-            rule.onNodeWithText("Edit / confirm").performScrollTo().performClick()
-            rule.onNodeWithText("Amount (INR)").performTextReplacement("2999.00")
+            rule.onNodeWithText("Edit / confirm").assertIsDisplayed().performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextReplacement("2999.00")
             rule.activityRule.scenario.recreate()
-            rule.waitUntil(15000) { rule.onAllNodesWithText("Edit / confirm transaction").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Payment details").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("2999.00").assertExists()
         } finally {
             runBlocking {

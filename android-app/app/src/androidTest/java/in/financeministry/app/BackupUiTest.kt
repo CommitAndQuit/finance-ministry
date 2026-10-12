@@ -97,8 +97,8 @@ class BackupUiTest {
         fun readFile(name: String): ByteArray = android.os.ParcelFileDescriptor.AutoCloseInputStream(
             automation.executeShellCommand("cat /sdcard/Download/$name")).use { it.readBytes() }
         try {
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("Backup & export").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.onNodeWithText("Backup & restore").performScrollTo().performClick()
             createBackup(backupName)
             val bytes = readFile(backupName)
             assertEquals("FMBAK001", bytes.take(8).toByteArray().toString(Charsets.US_ASCII))
@@ -153,8 +153,8 @@ class BackupUiTest {
             catch (e: Throwable) { throw AssertionError("Picker windows: $lastWindows", e) }
         }
         try {
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("Backup & export").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.onNodeWithText("Backup & restore").performScrollTo().performClick()
             rule.onNodeWithText("Create encrypted backup").performClick()
             rule.onNodeWithText("Backup password").performTextInput("test-only-password-long")
             rule.onNodeWithText("Confirm backup password").performTextInput("test-only-password-long")

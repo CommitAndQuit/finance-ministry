@@ -15,7 +15,7 @@ enum class TransactionStatus { Successful, Failed, Reversed, Pending, Unknown }
 enum class Channel { UPI, Card, ATM, IMPS, NEFT, RTGS, BankTransfer, CashManual, Other, Unknown }
 enum class TransactionType { MerchantPayment, P2PTransfer, SelfTransfer, CardRepayment, SalaryIncome, Refund, Reversal, CashWithdrawal, Deposit, FeeCharge, Other, Unknown }
 enum class SourceType { SMS, Manual }
-enum class ReviewState { AutoRecorded, NeedsReview, Confirmed }
+enum class ReviewState { AutoRecorded, NeedsReview, Confirmed, Dismissed }
 /** Who ultimately bears this cost. Kept separate from the payment channel and category. */
 enum class SpendingOwnership { Personal, Family, ForOther, Group, SelfTransfer }
 

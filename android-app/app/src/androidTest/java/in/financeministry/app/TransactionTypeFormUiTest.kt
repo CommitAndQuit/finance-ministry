@@ -31,11 +31,11 @@ class TransactionTypeFormUiTest {
         rule.setContent { MaterialTheme { TransactionForm(repo, fixture, onDone = {}) } }
     }
     private fun awaitSources() {
-        rule.waitUntil(15000) { rule.onAllNodes(hasText("Save transaction") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(15000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
     }
     private fun save(repo: TransactionRepository) {
         awaitSources()
-        rule.onNodeWithText("Save transaction").performClick()
+        rule.onNode(publicEditorSaveButton()).performClick()
         rule.waitUntil(15000) { runBlocking { repo.get("fixture")!!.reviewState == "Confirmed" } }
     }
 
@@ -55,7 +55,7 @@ class TransactionTypeFormUiTest {
         try {
             open(repo, row("Credit", "Card"))
             awaitSources()
-            rule.onNodeWithText("Save transaction").performClick()
+            rule.onNode(publicEditorSaveButton()).performClick()
             rule.onNodeWithText("Choose card bill payment, refund, or other money in.").assertExists()
             assertEquals("NeedsReview", runBlocking { repo.get("fixture")!!.reviewState })
             rule.onNodeWithText("Refund").performScrollTo().performClick()
@@ -79,7 +79,7 @@ class TransactionTypeFormUiTest {
         val repo = repository()
         try {
             open(repo, row())
-            rule.onNodeWithText("Transfer between my accounts").performScrollTo().performClick()
+            rule.onNodeWithText("Self transfer").performScrollTo().performClick()
             save(repo)
             val saved = runBlocking { repo.get("fixture")!! }
             assertEquals("SelfTransfer", saved.transactionType)
@@ -104,9 +104,10 @@ class TransactionTypeFormUiTest {
         val repo = repository()
         try {
             open(repo, row("Credit", "NEFT", "SalaryIncome"))
-            rule.onNodeWithText("Transaction type: Salary Income").assertDoesNotExist()
+            rule.onNodeWithText("Salary Income").assertDoesNotExist()
+            rule.onNodeWithText("More details").performScrollTo().performClick()
             rule.onNodeWithText("Advanced details").performScrollTo().performClick()
-            rule.onNodeWithText("Transaction type: Salary Income").performScrollTo().assertIsDisplayed()
+            rule.onNodeWithText("Salary Income").performScrollTo().assertIsDisplayed()
             save(repo)
             assertEquals("SalaryIncome", runBlocking { repo.get("fixture")!!.transactionType })
         } finally { runBlocking { repo.eraseAll(); repo.close() } }
@@ -125,15 +126,15 @@ class TransactionTypeFormUiTest {
         try {
             check(locked.await(15, TimeUnit.SECONDS))
             rule.setContent { MaterialTheme { TransactionForm(repo, fixture, onDone = {}) } }
-            rule.onNodeWithText("Save transaction").assertIsNotEnabled()
+            rule.onNode(publicEditorSaveButton()).assertIsNotEnabled()
             // Exercise a queued callback as well as the visual disabled state.
-            rule.onNodeWithText("Save transaction").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
             release.countDown()
             runBlocking { lockJob.join() }
             rule.waitUntil(15000) { rule.onAllNodesWithText("Other money in").fetchSemanticsNodes().isNotEmpty() }
             awaitSources()
             assertEquals("NeedsReview", runBlocking { repo.get("fixture")!!.reviewState })
-            rule.onNodeWithText("Save transaction").performClick()
+            rule.onNode(publicEditorSaveButton()).performClick()
             rule.onNodeWithText("Choose card bill payment, refund, or other money in.").assertExists()
             assertEquals("NeedsReview", runBlocking { repo.get("fixture")!!.reviewState })
             rule.onNodeWithText("Refund").performScrollTo().performClick()

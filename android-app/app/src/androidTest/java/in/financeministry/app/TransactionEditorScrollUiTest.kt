@@ -34,10 +34,10 @@ class TransactionEditorScrollUiTest {
             rule.setContent { MaterialTheme { LedgerApp(repo, null, consumeRequest = {}) } }
             rule.waitUntil(15_000) { rule.onAllNodesWithText("₹18.18").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Scroll fixture"))
-            rule.onNodeWithText("Scroll fixture").performClick()
-            rule.onNodeWithText("Edit / confirm").performScrollTo().performClick()
+            rule.onNodeWithText("Scroll fixture").performTouchInput { longClick() }
+            rule.onNodeWithText("Edit / confirm").assertIsDisplayed().performClick()
             rule.waitUntil(15_000) {
-                rule.onAllNodes(hasText("Save transaction") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty()
             }
             check(repo, fixture)
         } finally {
@@ -48,9 +48,10 @@ class TransactionEditorScrollUiTest {
     }
 
     private fun pullDownAtTop() {
-        rule.onNodeWithText("Edit / confirm transaction").performScrollTo()
-        val bounds = rule.onNode(hasScrollAction() and SemanticsMatcher.keyIsDefined(
-            androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange)).fetchSemanticsNode().boundsInWindow
+        rule.onNode(editableLedgerField("Amount (INR)")).performScrollTo()
+        val bounds = rule.onNode(hasScrollAction() and hasAnyDescendant(hasText("Amount (INR)")) and
+            SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange))
+            .fetchSemanticsNode().boundsInWindow
         val x = (bounds.left + bounds.width * .7f).toInt()
         val start = (bounds.top + bounds.height * .25f).toInt()
         val end = (bounds.top + bounds.height * .85f).toInt()
@@ -68,36 +69,38 @@ class TransactionEditorScrollUiTest {
     // Re-enabling sheet dragging lets the form's top-edge scroll dismiss the editor.
     @Test fun downward_scroll_at_top_keeps_untouched_dashboard_editor_open() = withEditor { repo, fixture ->
         pullDownAtTop()
-        rule.onNodeWithText("Edit / confirm transaction").assertIsDisplayed()
+        rule.onNodeWithText("Payment details").assertIsDisplayed()
         rule.onNodeWithText("18.18").assertExists()
         assertEquals(fixture, runBlocking { repo.get(fixture.id) })
-        rule.onNodeWithText("Cancel").performClick()
-        rule.onNodeWithContentDescription("Open overview").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
+        rule.onNodeWithContentDescription("Open home").assertIsDisplayed()
     }
 
     @Test fun form_still_scrolls_to_lower_fields_and_back() = withEditor { _, _ ->
+        rule.onNodeWithText("More details").performScrollTo().performClick()
         rule.onNodeWithText("Advanced details").performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText("Edit / confirm transaction").performScrollTo().assertIsDisplayed()
-        rule.onNodeWithText("Save transaction").assertIsDisplayed()
+        rule.onNode(editableLedgerField("Amount (INR)")).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText("Payment details").assertIsDisplayed()
+        rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
     }
 
     @Test fun downward_scroll_preserves_draft_and_cancel_still_requires_confirmation() = withEditor { repo, fixture ->
-        rule.onNodeWithText("Amount (INR)").performTextReplacement("19.19")
+        rule.onNode(editableLedgerField("Amount (INR)")).performTextReplacement("19.19")
         Espresso.closeSoftKeyboard()
         pullDownAtTop()
         rule.onNodeWithText("19.19").assertExists()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
         rule.onNodeWithText("Keep editing").performClick()
         rule.onNodeWithText("19.19").assertExists()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
         rule.onNodeWithText("Discard changes").performClick()
-        rule.onNodeWithContentDescription("Open overview").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Open home").assertIsDisplayed()
         assertEquals(fixture, runBlocking { repo.get(fixture.id) })
     }
 
     @Test fun android_back_closes_an_untouched_editor() = withEditor { repo, fixture ->
         Espresso.pressBack()
-        rule.onNodeWithContentDescription("Open overview").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Open home").assertIsDisplayed()
         assertEquals(fixture, runBlocking { repo.get(fixture.id) })
     }
 
@@ -107,7 +110,7 @@ class TransactionEditorScrollUiTest {
         rule.onNodeWithText("Keep editing").performClick()
         rule.onNodeWithText("Family").assertIsSelected()
         assertEquals(fixture, runBlocking { repo.get(fixture.id) })
-        rule.onNodeWithText("Save transaction").performClick()
+        rule.onNode(publicEditorSaveButton()).performClick()
         rule.waitUntil(15_000) { runBlocking { repo.get(fixture.id)?.ownership == "Family" } }
         assertEquals(1818L, runBlocking { repo.get(fixture.id)!!.amountMinor })
         assertEquals("Food", runBlocking { repo.get(fixture.id)!!.category })
@@ -122,17 +125,17 @@ class TransactionEditorScrollUiTest {
             automation.serviceInfo = automation.serviceInfo.apply {
                 flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             }
-            rule.onNodeWithText("Amount (INR)").performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performClick()
             rule.waitUntil(5_000) { automation.windows.any {
                 it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD
             } }
             pullDownAtTop()
-            rule.onNodeWithText("Edit / confirm transaction").assertExists()
+            rule.onNodeWithText("Payment details").assertExists()
             rule.onNodeWithText("18.18").assertExists()
-            rule.onNodeWithText("Save transaction").assertIsDisplayed()
+            rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
             assertEquals(fixture, runBlocking { repo.get(fixture.id) })
             Espresso.closeSoftKeyboard()
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithContentDescription("Close transaction editor").performClick()
         } finally {
             if (keyboardSetting == "null") shell("settings delete secure show_ime_with_hard_keyboard")
             else shell("settings put secure show_ime_with_hard_keyboard ${keyboardSetting.toInt()}")

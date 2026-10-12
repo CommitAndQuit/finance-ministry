@@ -37,7 +37,7 @@ object TransactionNotifications {
         val amount = row.amountMinor?.let { "₹${BigDecimal.valueOf(it, 2).toPlainString()}" } ?: "Amount needs review"
         val view = action(false)
         val notification = Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (row.reviewState == "NeedsReview") "Transaction needs review" else if (row.transactionType == "CardRepayment") "Card bill payment recorded" else "Transaction recorded")
+            .setContentTitle(if (row.reviewState == "NeedsReview") "Transaction needs review" else if (row.transactionType == "CardRepayment") "${transactionFlowLabel(row)} recorded" else "Transaction recorded")
             .setContentText("$amount · ${transactionFlowLabel(row)} · ${friendly(row.status)}")
             .setVisibility(Notification.VISIBILITY_PRIVATE).setAutoCancel(true).setContentIntent(view)
             .setPublicVersion(Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification).setContentTitle("Finance Ministry transaction").build())

@@ -17,6 +17,7 @@ import `in`.financeministry.app.core.model.*
 import `in`.financeministry.app.data.*
 import `in`.financeministry.app.feature.RepaymentHistoryPanel
 import `in`.financeministry.app.feature.RepaymentsScreen
+import `in`.financeministry.app.feature.PeopleContent
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -55,7 +56,7 @@ class RepaymentFlowUiTest {
         rule.setContent { FinanceMinistryTheme { Surface(Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().padding(16.dp)) { RepaymentHistoryPanel(repo, row, true) }
         } } }
-        rule.onNode(hasText("Record repayment") or hasText("Record money received")).performClick()
+        rule.onNode(hasText("Record repayment") and hasClickAction()).performClick()
     }
     private fun capture(name: String) {
         rule.waitForIdle()
@@ -70,11 +71,60 @@ class RepaymentFlowUiTest {
         automation.serviceInfo = automation.serviceInfo.apply {
             flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
-        rule.waitUntil(10000) { automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }
+        // The real IME and dialog-window resize are driven by Android, not the
+        // Compose test clock. A tap using a moving footer's old coordinates can
+        // miss Save even though its semantics is enabled. Wait for observable
+        // native bounds to settle; never retry the save or invoke its callback.
+        var previousBounds: Pair<androidx.compose.ui.geometry.Rect, android.graphics.Rect>? = null
+        var lastMovementAt = android.os.SystemClock.elapsedRealtime()
+        var movements = 0
+        rule.waitUntil(10000) {
+            val ime = automation.windows.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            if (ime == null) false else {
+                val imeBounds = android.graphics.Rect().also(ime::getBoundsInScreen)
+                val buttonBounds = rule.onNode((hasText("Confirm & link repayment") or hasText("Record cash repayment") or hasText("Save repayment")) and hasClickAction())
+                    .fetchSemanticsNode().boundsInWindow
+                val current = buttonBounds to imeBounds
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (current != previousBounds) {
+                    previousBounds = current; lastMovementAt = now; movements++; false
+                } else now - lastMovementAt >= 200
+            }
+        }
+        println("Repayment native footer/IME bounds settled after $movements observed positions: $previousBounds")
         val keyboard = android.graphics.Rect()
         automation.windows.first { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }.getBoundsInScreen(keyboard)
-        val save = rule.onNodeWithText("Save repayment").fetchSemanticsNode().boundsInWindow
+        val save = rule.onNode((hasText("Confirm & link repayment") or hasText("Record cash repayment") or hasText("Save repayment")) and hasClickAction()).fetchSemanticsNode().boundsInWindow
         assertTrue("Save overlaps the visible keyboard", save.bottom <= keyboard.top)
+    }
+
+    // Merely presenting or selecting a possible match must never mutate the ledger.
+    @Test fun people_possible_match_requires_explicit_confirmation_and_preserves_recorded_income() {
+        val repo = repository()
+        val expense = runBlocking { repo.save(ManualInput("200", Direction.Debit, System.currentTimeMillis(),
+            TransactionType.Other, label = "Paid for Alice", ownership = SpendingOwnership.ForOther,
+            groupLabel = "Alice", personalShare = "0")) }
+        val incoming = runBlocking { repo.save(ManualInput("200", Direction.Credit, System.currentTimeMillis(),
+            TransactionType.Other, label = "Alice repayment")) }
+        val before = runBlocking { repo.snapshot().credit }
+        try {
+            rule.setContent { FinanceMinistryTheme { Surface(Modifier.fillMaxSize()) {
+                PeopleContent(repo, LocalDate.now(), {}, {})
+            } } }
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Alice").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Alice").performClick()
+            rule.onNodeWithText("Record repayment").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Alice repayment").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(runBlocking { repo.repaymentsFor(expense).isEmpty() })
+            rule.onNodeWithText("Confirm & link repayment").assertIsNotEnabled()
+            rule.onNodeWithText("Alice repayment").performClick()
+            assertTrue(runBlocking { repo.repaymentsFor(expense).isEmpty() })
+            rule.onNodeWithText("Confirm & link repayment").performClick()
+            rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(expense).size == 1 } }
+            assertEquals(incoming, runBlocking { repo.repaymentsFor(expense).single().incomingId })
+            assertEquals(before, runBlocking { repo.snapshot().credit })
+            assertEquals(0L, runBlocking { RepaymentAccounting.owed(repo.get(expense)!!) })
+        } finally { runBlocking { repo.eraseAll(); repo.close() } }
     }
 
     // A missing direct action must fail this: recording must not route through transaction details.
@@ -84,15 +134,15 @@ class RepaymentFlowUiTest {
         var openedDetails = false
         try {
             rule.setContent { FinanceMinistryTheme { RepaymentsScreen(repo, LocalDate.now(), {}, { openedDetails = true }) } }
-            rule.waitUntil(15000) { rule.onAllNodesWithText("Still owed · all dates").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Still owed to you · all dates").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Flatmates"))
             rule.onNodeWithText("Flatmates").performClick()
-            rule.onNodeWithText("Record money received").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Record repayment").assertIsDisplayed().performClick()
             rule.onNodeWithText("Received cash").performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performClick().performTextInput("500")
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performClick().performTextInput("500")
             assertSaveAboveKeyboard()
             capture("cash-keyboard.png")
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().performClick()
             rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).size == 1 } }
             assertFalse(openedDetails)
             assertEquals(150000L, runBlocking { repo.get(id)!!.let(RepaymentAccounting::owed) })
@@ -111,15 +161,15 @@ class RepaymentFlowUiTest {
         val before = runBlocking { repo.snapshot().credit }
         try {
             panel(repo, id)
-            rule.onNodeWithText("Save repayment").assertIsDisplayed()
-            rule.onNode(hasText("Choose a recorded payment") or hasText("Link an existing money-in")).performClick()
-            rule.onNodeWithText("Search recorded payments").performTextInput("Chosen receipt")
+            rule.onNodeWithText("Confirm & link repayment").assertIsDisplayed()
+            rule.onNode(hasText("Choose a recorded payment") and hasClickAction()).performScrollTo().performClick()
+            rule.onNode(editableLedgerField("Search recorded payments")).performTextInput("Chosen receipt")
             capture("recorded-payment-search.png")
             rule.onNode(hasText("Chosen receipt") and !hasSetTextAction()).performScrollTo().performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performClick().performTextInput("500")
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performScrollTo().performClick().performTextReplacement("500")
             assertSaveAboveKeyboard()
             rule.onNodeWithText("Still owed after saving: ₹1,500.00").assertExists()
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Confirm & link repayment").assertIsDisplayed().performClick()
             rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).size == 1 } }
             assertEquals(receipt, runBlocking { repo.repaymentsFor(id).single().incomingId })
             assertEquals(before, runBlocking { repo.snapshot().credit })
@@ -133,13 +183,21 @@ class RepaymentFlowUiTest {
         val id = expense(repo)
         try {
             panel(repo, id)
-            rule.onNode(hasText("Received cash") or hasText("Record cash repayment")).performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performTextInput("2001")
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Received cash").performClick()
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextInput("2001")
+            assertSaveAboveKeyboard()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().assertIsEnabled().performClick()
+            // Validation completes on the repository's IO dispatcher. Await the
+            // actual feedback; do not retry Save or waive its visible-error check.
+            rule.waitUntil(15000) {
+                rule.onAllNodesWithText("Repayment exceeds the amount still owed.").fetchSemanticsNodes().isNotEmpty()
+            }
             rule.onNodeWithText("Repayment exceeds the amount still owed.").assertIsDisplayed()
+            capture("cash-overpayment-keyboard.png")
             assertTrue(runBlocking { repo.repaymentsFor(id).isEmpty() })
-            rule.onNodeWithText("Repayment amount (INR)").performTextReplacement("500")
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextReplacement("500")
+            assertSaveAboveKeyboard()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().assertIsEnabled().performClick()
             rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).size == 1 } }
             assertEquals(50000L, runBlocking { repo.repaymentsFor(id).single().amountMinor })
         } finally { runBlocking { repo.eraseAll(); repo.close() } }
@@ -156,10 +214,30 @@ class RepaymentFlowUiTest {
             } } }
             rule.waitUntil(15000) { rule.onAllNodesWithText("Edit repayment").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Edit repayment").performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performTextReplacement("250")
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextReplacement("250")
             rule.onNodeWithText("Still owed after saving: ₹1,750.00").assertExists()
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
-            rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).single().amountMinor == 25000L } }
+            // A visible footer can still be disabled while repayment data loads.
+            // Catch that state directly instead of silently tapping a disabled action.
+            assertSaveAboveKeyboard()
+            val save = rule.onNodeWithText("Save repayment").assertIsDisplayed().assertIsEnabled()
+            val tapBounds = save.fetchSemanticsNode().boundsInWindow
+            println("Repayment save tap bounds: $tapBounds")
+            save.performClick()
+            try {
+                rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).single().amountMinor == 25000L } }
+            } catch (failure: Throwable) {
+                // Preserve the synthetic editor/error state before the activity is
+                // disposed; isolated passes alone cannot explain suite-only failures.
+                println("Repayment save original failure: $failure")
+                runCatching { println("Repayment save bounds after wait: ${save.fetchSemanticsNode().boundsInWindow}; tapped at $tapBounds") }
+                // A sheet has a separate semantics root. Diagnostics must not
+                // replace the original failure when both windows are present.
+                runCatching { capture("repayment-edit-save-failure.png") }
+                    .onFailure { println("Could not capture repayment state: $it") }
+                runCatching { println(rule.onAllNodes(isRoot()).printToString()) }
+                    .onFailure { println("Could not print repayment state: $it") }
+                throw failure
+            }
             rule.onNodeWithText("Unlink").performClick()
             rule.onNodeWithText("Unlink repayment").performClick()
             rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).isEmpty() } }
@@ -174,15 +252,17 @@ class RepaymentFlowUiTest {
         try {
             panel(repo, id)
             rule.onNodeWithText("Received cash").performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performTextInput("500")
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextInput("500")
+            rule.onNodeWithText("Recorded payment").performScrollTo().performClick()
             rule.onNodeWithText("Choose a recorded payment").performScrollTo().performClick()
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             androidx.test.espresso.Espresso.pressBack()
-            rule.onNodeWithText("Repayment amount (INR)").assertIsDisplayed()
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).assertIsDisplayed()
             rule.onNodeWithText("500").assertExists()
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithText("Received cash").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Close repayment editor").performClick()
             rule.onNodeWithText("Keep editing").performClick()
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().performClick()
             rule.waitUntil(15000) { runBlocking { repo.repaymentsFor(id).size == 1 } }
             assertEquals(50000L, runBlocking { repo.repaymentsFor(id).single().amountMinor })
         } finally { runBlocking { repo.eraseAll(); repo.close() } }

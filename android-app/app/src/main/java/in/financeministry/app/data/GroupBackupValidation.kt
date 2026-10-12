@@ -13,6 +13,24 @@ internal fun validateGroupBackup(tables: Map<String, Map<String, JSONObject>>) {
         validateMemberName(name)
         require(name == name.trim() && names.add(name.lowercase(Locale.ROOT)) && it.getLong("createdAt") > 0) { "Invalid or duplicate local person." }
     }
+    val presets = tables.getValue("group_presets")
+    val presetMembers = tables.getValue("group_preset_members").values.groupBy { it.getString("presetId") }
+    require(presetMembers.keys.all { it in presets }) { "Saved group is missing." }
+    val presetNames = mutableSetOf<String>()
+    presets.forEach { (id, preset) ->
+        val name = preset.getString("name")
+        validateGroupPresetName(name)
+        require(name == name.trim() && presetNames.add(name.lowercase(Locale.ROOT)) &&
+            preset.getString("splitMode") in setOf("Equal", "Custom") && preset.getLong("createdAt") > 0 &&
+            preset.getLong("updatedAt") >= preset.getLong("createdAt")) { "Invalid saved group." }
+        val rows = presetMembers[id].orEmpty().sortedBy { it.getLong("position") }
+        require(rows.size in 1..20 && rows.map { it.getString("memberId") }.distinct().size == rows.size &&
+            rows.map { it.getLong("position") } == rows.indices.map { it.toLong() } &&
+            rows.all { it.getString("memberId") in members && it.getLong("weight") >= 0 }) { "Invalid saved group people." }
+        val weights = listOf(preset.getLong("personalWeight")) + rows.map { it.getLong("weight") }
+        GroupPresetAccounting.custom(1, weights)
+        if (preset.getString("splitMode") == "Equal") require(weights.all { it == 1L }) { "Invalid equal split default." }
+    }
     val transactions = tables.getValue("transactions")
     val shares = tables.getValue("group_shares").values.groupBy { it.getString("expenseId") }
     shares.forEach { (id, rows) ->

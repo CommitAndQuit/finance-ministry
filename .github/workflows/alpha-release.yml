@@ -17,7 +17,7 @@ jobs:
     needs: verification
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
@@ -43,14 +43,21 @@ jobs:
             echo 'Tag already exists; bump versionName and versionCode.' >&2; exit 1
           fi
           # Compare every previous alpha tag's version code, not just the last semantic tag.
+          baseline_code=0
+          baseline_sha=''
           for previous in $(git tag -l 'v*-alpha.*'); do
             old=$(git show "$previous:android-app/version.properties" | sed -n 's/^versionCode=//p' | tr -d '\r')
             [[ "$old" =~ ^[1-9][0-9]*$ ]]
             (( code > old )) || { echo 'versionCode must increase.' >&2; exit 1; }
+            if (( old > baseline_code )); then
+              baseline_code=$old
+              baseline_sha=$(git rev-parse "$previous^{commit}")
+            fi
           done
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "baseline_sha=$baseline_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
@@ -76,7 +83,31 @@ jobs:
           FM_REQUIRE_ALPHA_SIGNING: 'true'
           FM_ALPHA_KEYSTORE: ${{ runner.temp }}/finance-alpha.p12
           FM_ALPHA_STORE_PASSWORD: ${{ secrets.ALPHA_STORE_PASSWORD }}
-        run: ./gradlew --no-daemon --console=plain testDebugUnitTest lintDebug assembleDebug
+        run: ./gradlew --no-daemon --console=plain testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest
+      - name: Check out previous alpha test sources
+        if: steps.version.outputs.baseline_sha != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.version.outputs.baseline_sha }}
+          path: upgrade-baseline
+          persist-credentials: false
+      - name: Build previous alpha matching test APK
+        if: steps.version.outputs.baseline_sha != ''
+        working-directory: upgrade-baseline/android-app
+        env:
+          FM_REQUIRE_ALPHA_SIGNING: 'true'
+          FM_ALPHA_KEYSTORE: ${{ runner.temp }}/finance-alpha.p12
+          FM_ALPHA_STORE_PASSWORD: ${{ secrets.ALPHA_STORE_PASSWORD }}
+        run: ./gradlew --no-daemon --console=plain assembleDebugAndroidTest
+      - name: Retain matching upgrade test APKs (not release downloads)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-upgrade-test-apks
+          path: |
+            android-app/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+            upgrade-baseline/android-app/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          retention-days: 7
+          if-no-files-found: error
       - name: Package APK, notices, checksum and certificate
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -101,7 +132,7 @@ jobs:
           printf '%s\n' "Debug alpha $VERSION for testing; not ready for general use." '' \
             'Download the APK asset. See README for setup and permission instructions.' '' \
             "$changes" '' \
-            'Existing records are not silently reclassified or assigned to people. Review old errors individually. Backups created by this release require alpha.20 or later; older schema-7 backups remain readable. CSV schema 3 includes local participant names and is an unencrypted report, not a restore backup. Do not downgrade an updated installation.' '' \
+            'Existing records are not silently reclassified or assigned to people. Review old errors individually. Backups created by this release use schema 9 and require a schema-9-capable version; they cannot be restored by the published alpha.20 or older. Older supported backups remain readable. CSV schema 3 includes local participant names and is an unencrypted report, not a restore backup. Do not downgrade an updated installation.' '' \
             'Keep any backup password safe; the app cannot recover it. This is an independent app, not a government service or bank.' '' \
             'Install over a previous official alpha to update. Back up an important ledger before updating or replacing data.' '' \
             'JVM tests, lint and assembly passed in this signed release run. The prerequisite Android 16 debug instrumentation and synthetic SMS gates passed. Signed artifact upgrade/recovery and physical-device verification remain separate requirements; consult version-specific reports before wider distribution.' '' \

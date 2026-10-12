@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$AdbPath,
     [Parameter(Mandatory = $true)][ValidatePattern('^emulator-[0-9]+$')][string]$Serial,
-    [ValidateRange(1,20)][int]$Repetitions = 1
+    [ValidateRange(1,20)][int]$Repetitions = 1,
+    [ValidateSet('Numeric','ServiceHeader')][string]$SenderProfile = 'Numeric'
 )
 $ErrorActionPreference = 'Stop'
 if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'ADB executable not found.' }
@@ -11,8 +12,13 @@ $taskTemp = Join-Path ([IO.Path]::GetTempPath()) ('finance-sms-check-' + [guid]:
 New-Item -ItemType Directory -Path $taskTemp | Out-Null
 $output = Join-Path $taskTemp 'instrumentation.txt'
 $errors = Join-Path $taskTemp 'adb-errors.txt'
+# Fictional service header only. Syntax is not sender authentication; no real bank
+# identity or user message is used by either validation profile.
+$sender = if ($SenderProfile -eq 'ServiceHeader') { 'EXBANK' } else { '999990001' }
+$reviewState = if ($SenderProfile -eq 'ServiceHeader') { 'AutoRecorded' } else { 'NeedsReview' }
 $arguments = @('-s', $Serial, 'shell', 'am', 'instrument', '-w', '-r', '-e', 'class',
     'in.financeministry.app.SmsBroadcastE2eTest', '-e', 'runSmsE2e', 'true', '-e', 'smsRepetitions', "$Repetitions",
+    '-e', 'expectedReviewState', $reviewState, '-e', 'expectedSmsSender', $sender,
     'in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner')
 $initialMarker = ((& $AdbPath -s $Serial shell run-as in.financeministry.app cat files/synthetic_sms_test_ready 2>$null) -join '').Trim()
 $launch = @{FilePath=$AdbPath; ArgumentList=$arguments; PassThru=$true; RedirectStandardOutput=$output; RedirectStandardError=$errors}
@@ -24,7 +30,7 @@ while (-not $process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
     $marker = ((& $AdbPath -s $Serial shell run-as in.financeministry.app cat files/synthetic_sms_test_ready 2>$null) -join '').Trim()
     if ($marker -ne $initialMarker -and $marker -match '^[0-9a-f-]{36}:([0-9]+)$' -and $sent.Add($marker)) {
         # Synthetic input only. Never read or transmit the user's SMS inbox.
-        & $AdbPath -s $Serial emu sms send 999990001 "FM synthetic $marker INR 314.15 debited via UPI" | Out-Null
+        & $AdbPath -s $Serial emu sms send $sender "FM synthetic $marker INR 314.15 debited via UPI" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Emulator SMS injection failed.' }
     }
     Start-Sleep -Milliseconds 250

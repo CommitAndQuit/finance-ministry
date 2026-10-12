@@ -50,12 +50,13 @@ object TransactionMatching {
                     a.channel == b.channel && a.channel !in setOf("Unknown", "CashManual")
                 val sameReference = a.referenceHash != null && b.referenceHash != null && a.referenceHash.contentEquals(b.referenceHash)
                 val conflictingReferences = a.referenceHash != null && b.referenceHash != null && !sameReference
+                val conflictingSources = sourceA != null && sourceB != null && sourceA.id != sourceB.id
                 val sameMerchant = !a.counterpartyLabel.isNullOrBlank() &&
                     a.counterpartyLabel.trim().equals(b.counterpartyLabel?.trim(), ignoreCase = true)
                 val manualAndSms = setOf(a.sourceType, b.sourceType) == setOf("Manual", "SMS")
                 val kind: MatchKind
                 val evidence: List<String>
-                if (a.direction == b.direction && !conflictingReferences &&
+                if (a.direction == b.direction && !conflictingReferences && !conflictingSources &&
                     (sameSource || sameMaskedInstrument && sameReference) && (manualAndSms || sameMerchant || sameReference)) {
                     kind = MatchKind.Duplicate
                     evidence = listOf("Same amount and direction", "Within five minutes",

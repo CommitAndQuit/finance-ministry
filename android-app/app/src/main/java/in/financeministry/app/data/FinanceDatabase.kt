@@ -113,7 +113,7 @@ data class CorrectionEntity(@PrimaryKey val id: String, val transactionId: Strin
     val fieldName: String, val previousValue: String?, val newValue: String?)
 
 /** A result-set subtotal. This is deliberately separate from the monthly ledger totals. */
-data class TransactionResultTotals(val count: Long, val debit: Long, val credit: Long)
+data class TransactionResultTotals(val count: Long, val debit: Long, val credit: Long, val personalSpend: Long)
 
 @Dao
 interface TransactionDao {
@@ -164,7 +164,7 @@ interface TransactionDao {
     fun reviewPage(limit: Int, offset: Int): List<TransactionEntity>
     @Query("SELECT * FROM transactions WHERE effectiveTimestamp >= :start AND effectiveTimestamp < :end AND (:reviewOnly = 0 OR reviewState = 'NeedsReview') AND (:direction = 'All' OR direction = :direction) AND (:purpose = 'All' OR (:purpose = 'Personal' AND ownership = 'Personal') OR (:purpose = 'Family' AND ownership = 'Family') OR (:purpose = 'ForOthers' AND ownership = 'ForOther') OR (:purpose = 'Group' AND ownership = 'Group') OR (:purpose = 'SelfTransfer' AND (ownership = 'SelfTransfer' OR transactionType = 'SelfTransfer'))) AND (:origin = 'All' OR (:origin = 'Manual' AND sourceType = 'Manual') OR (:origin = 'Edited' AND isUserCorrected = 1)) AND (:allCategories = 1 OR category IN (:categories)) AND (:allSources = 1 OR paymentSourceId IN (:sourceIds)) AND (:paymentKind = 'All' OR (:paymentKind = 'CardBills' AND transactionType = 'CardRepayment') OR (:paymentKind = 'CardCreditsToCheck' AND direction = 'Credit' AND (channel = 'Card' OR paymentSourceId IN (SELECT id FROM payment_sources WHERE kind = 'Credit card')) AND transactionType IN ('Unknown', 'Other', 'MerchantPayment', 'Deposit'))) AND (:search = '' OR LOWER(COALESCE(counterpartyLabel, '')) LIKE '%' || LOWER(:search) || '%' OR LOWER(COALESCE(userNotes, '')) LIKE '%' || LOWER(:search) || '%') ORDER BY effectiveTimestamp DESC, id DESC LIMIT :limit OFFSET :offset")
     fun page(purpose: String, origin: String, direction: String, reviewOnly: Boolean, start: Long, end: Long, limit: Int, offset: Int, allCategories: Boolean, categories: List<String>, allSources: Boolean, sourceIds: List<String>, search: String, paymentKind: String = "All"): List<TransactionEntity>
-    @Query("SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN direction = 'Debit' AND duplicateOfId IS NULL AND currency = 'INR' AND amountMinor > 0 AND status = 'Successful' AND reviewState != 'NeedsReview' AND transactionType NOT IN ('SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview') THEN COALESCE(amountMinor, 0) ELSE 0 END), 0) AS debit, COALESCE(SUM(CASE WHEN direction = 'Credit' AND duplicateOfId IS NULL AND currency = 'INR' AND amountMinor > 0 AND status = 'Successful' AND reviewState != 'NeedsReview' AND transactionType NOT IN ('SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview') THEN COALESCE(amountMinor, 0) ELSE 0 END), 0) AS credit FROM transactions WHERE effectiveTimestamp >= :start AND effectiveTimestamp < :end AND (:reviewOnly = 0 OR reviewState = 'NeedsReview') AND (:direction = 'All' OR direction = :direction) AND (:purpose = 'All' OR (:purpose = 'Personal' AND ownership = 'Personal') OR (:purpose = 'Family' AND ownership = 'Family') OR (:purpose = 'ForOthers' AND ownership = 'ForOther') OR (:purpose = 'Group' AND ownership = 'Group') OR (:purpose = 'SelfTransfer' AND (ownership = 'SelfTransfer' OR transactionType = 'SelfTransfer'))) AND (:origin = 'All' OR (:origin = 'Manual' AND sourceType = 'Manual') OR (:origin = 'Edited' AND isUserCorrected = 1)) AND (:allCategories = 1 OR category IN (:categories)) AND (:allSources = 1 OR paymentSourceId IN (:sourceIds)) AND (:paymentKind = 'All' OR (:paymentKind = 'CardBills' AND transactionType = 'CardRepayment') OR (:paymentKind = 'CardCreditsToCheck' AND direction = 'Credit' AND (channel = 'Card' OR paymentSourceId IN (SELECT id FROM payment_sources WHERE kind = 'Credit card')) AND transactionType IN ('Unknown', 'Other', 'MerchantPayment', 'Deposit'))) AND (:search = '' OR LOWER(COALESCE(counterpartyLabel, '')) LIKE '%' || LOWER(:search) || '%' OR LOWER(COALESCE(userNotes, '')) LIKE '%' || LOWER(:search) || '%')")
+    @Query("SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN direction = 'Debit' AND duplicateOfId IS NULL AND currency = 'INR' AND amountMinor > 0 AND status = 'Successful' AND reviewState IN ('AutoRecorded', 'Confirmed') AND transactionType NOT IN ('SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState IN ('AutoRecorded', 'Confirmed')) THEN COALESCE(amountMinor, 0) ELSE 0 END), 0) AS debit, COALESCE(SUM(CASE WHEN direction = 'Credit' AND duplicateOfId IS NULL AND currency = 'INR' AND amountMinor > 0 AND status = 'Successful' AND reviewState IN ('AutoRecorded', 'Confirmed') AND transactionType NOT IN ('SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState IN ('AutoRecorded', 'Confirmed')) THEN COALESCE(amountMinor, 0) ELSE 0 END), 0) AS credit, COALESCE(SUM(CASE WHEN direction = 'Debit' AND duplicateOfId IS NULL AND currency = 'INR' AND amountMinor > 0 AND status = 'Successful' AND reviewState IN ('AutoRecorded', 'Confirmed') AND transactionType NOT IN ('SelfTransfer', 'CardRepayment') AND ownership != 'SelfTransfer' AND id NOT IN (SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState IN ('AutoRecorded', 'Confirmed')) THEN CASE WHEN repaymentExpected = 1 AND ownership IN ('ForOther', 'Group') THEN COALESCE(personalShareMinor, amountMinor, 0) ELSE COALESCE(amountMinor, 0) END ELSE 0 END), 0) AS personalSpend FROM transactions WHERE effectiveTimestamp >= :start AND effectiveTimestamp < :end AND (:reviewOnly = 0 OR reviewState = 'NeedsReview') AND (:direction = 'All' OR direction = :direction) AND (:purpose = 'All' OR (:purpose = 'Personal' AND ownership = 'Personal') OR (:purpose = 'Family' AND ownership = 'Family') OR (:purpose = 'ForOthers' AND ownership = 'ForOther') OR (:purpose = 'Group' AND ownership = 'Group') OR (:purpose = 'SelfTransfer' AND (ownership = 'SelfTransfer' OR transactionType = 'SelfTransfer'))) AND (:origin = 'All' OR (:origin = 'Manual' AND sourceType = 'Manual') OR (:origin = 'Edited' AND isUserCorrected = 1)) AND (:allCategories = 1 OR category IN (:categories)) AND (:allSources = 1 OR paymentSourceId IN (:sourceIds)) AND (:paymentKind = 'All' OR (:paymentKind = 'CardBills' AND transactionType = 'CardRepayment') OR (:paymentKind = 'CardCreditsToCheck' AND direction = 'Credit' AND (channel = 'Card' OR paymentSourceId IN (SELECT id FROM payment_sources WHERE kind = 'Credit card')) AND transactionType IN ('Unknown', 'Other', 'MerchantPayment', 'Deposit'))) AND (:search = '' OR LOWER(COALESCE(counterpartyLabel, '')) LIKE '%' || LOWER(:search) || '%' OR LOWER(COALESCE(userNotes, '')) LIKE '%' || LOWER(:search) || '%')")
     fun filteredTotals(purpose: String, origin: String, direction: String, reviewOnly: Boolean, start: Long, end: Long, allCategories: Boolean, categories: List<String>, allSources: Boolean, sourceIds: List<String>, search: String, paymentKind: String = "All"): TransactionResultTotals
     @Query("SELECT * FROM transactions WHERE id = :id") fun get(id: String): TransactionEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM transactions WHERE sourceFingerprint = :fingerprint)") fun hasFingerprint(fingerprint: ByteArray): Boolean
@@ -179,7 +179,7 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE referenceHash = :referenceHash") fun byReference(referenceHash: ByteArray): List<TransactionEntity>
     @Query("SELECT * FROM transactions WHERE linkedOriginalId = :id") fun linkedTo(id: String): List<TransactionEntity>
     @Query("UPDATE transactions SET linkedOriginalId = NULL WHERE linkedOriginalId = :id") fun unlinkFrom(id: String)
-    @Query("SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState != 'NeedsReview'") fun reversedOriginals(): List<String>
+    @Query("SELECT linkedOriginalId FROM transactions WHERE linkedOriginalId IS NOT NULL AND status = 'Reversed' AND reviewState IN ('AutoRecorded', 'Confirmed')") fun reversedOriginals(): List<String>
     @Insert(onConflict = OnConflictStrategy.ABORT) fun addSource(source: PaymentSourceEntity)
     @Update fun updateSource(source: PaymentSourceEntity)
     @Query("SELECT * FROM payment_sources WHERE active = 1 ORDER BY createdAt ASC") fun activeSources(): List<PaymentSourceEntity>
@@ -189,9 +189,10 @@ interface TransactionDao {
     @Query("UPDATE payment_sources SET active = 0 WHERE id = :id") fun retireSource(id: String)
 }
 
-@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class, PaymentSourceEntity::class, RepaymentEntity::class, CategoryRuleEntity::class, LedgerMetadataEntity::class, MatchDecisionEntity::class, BudgetEntity::class, RecurringReminderEntity::class, LocalMemberEntity::class, GroupShareEntity::class], version = 8, exportSchema = true)
+@Database(entities = [TransactionEntity::class, CorrectionEntity::class, ImportBatchEntity::class, PaymentSourceEntity::class, RepaymentEntity::class, CategoryRuleEntity::class, LedgerMetadataEntity::class, MatchDecisionEntity::class, BudgetEntity::class, RecurringReminderEntity::class, LocalMemberEntity::class, GroupShareEntity::class, GroupPresetEntity::class, GroupPresetMemberEntity::class], version = 9, exportSchema = true)
 abstract class FinanceDatabase : RoomDatabase() {
     abstract fun transactions(): TransactionDao
+    abstract fun groupPresets(): GroupPresetDao
     private var connectionPassword: ByteArray? = null
 
     override fun close() {
@@ -200,6 +201,16 @@ abstract class FinanceDatabase : RoomDatabase() {
     }
 
     companion object {
+        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS group_presets (id TEXT NOT NULL, name TEXT NOT NULL, splitMode TEXT NOT NULL, personalWeight INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(id))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS group_preset_members (id TEXT NOT NULL, presetId TEXT NOT NULL, memberId TEXT NOT NULL, position INTEGER NOT NULL, weight INTEGER NOT NULL, PRIMARY KEY(id), FOREIGN KEY(presetId) REFERENCES group_presets(id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(memberId) REFERENCES local_members(id) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_group_preset_members_presetId ON group_preset_members(presetId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_group_preset_members_memberId ON group_preset_members(memberId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_group_preset_members_presetId_memberId ON group_preset_members(presetId, memberId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_group_preset_members_presetId_position ON group_preset_members(presetId, position)")
+            }
+        }
         val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS local_members (id TEXT NOT NULL, name TEXT NOT NULL, createdAt INTEGER NOT NULL, PRIMARY KEY(id))")
@@ -271,7 +282,7 @@ abstract class FinanceDatabase : RoomDatabase() {
                 System.loadLibrary("sqlcipher")
                 Logger.setTarget(NoopTarget())
                 db = Room.databaseBuilder(context, FinanceDatabase::class.java, name)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .openHelperFactory(SupportOpenHelperFactory(connectionPassword)).build()
                 db.connectionPassword = connectionPassword
                 db.openHelper.writableDatabase

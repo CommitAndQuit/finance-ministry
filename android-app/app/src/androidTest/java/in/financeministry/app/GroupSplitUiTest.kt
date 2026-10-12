@@ -41,11 +41,13 @@ class GroupSplitUiTest {
         file.outputStream().use { check(instrumentation.uiAutomation.takeScreenshot().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
     }
     private fun addPerson(name: String) {
-        rule.waitUntil(15000) { rule.onAllNodes(hasText("New local name") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("New local name").performScrollTo().performTextInput(name)
+        rule.onNodeWithText("Add or manage people").performScrollTo().performClick()
+        rule.waitUntil(15000) { rule.onAllNodes(editableLedgerField("New local name") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(editableLedgerField("New local name")).performScrollTo().performTextInput(name)
         androidx.test.espresso.Espresso.closeSoftKeyboard()
         rule.onNodeWithText("Add person").performScrollTo().performClick()
-        rule.waitUntil(15000) { rule.onAllNodesWithText("Remove $name from split").fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Include $name in split").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Done").performClick()
     }
 
     @Test fun group_expense_has_a_discoverable_people_split_action() {
@@ -74,20 +76,22 @@ class GroupSplitUiTest {
             addPerson("Alice"); addPerson("Bob")
             rule.onAllNodesWithText("₹300.00").assertCountEquals(3)
             capture("equal-split.png")
-            rule.onNodeWithText("Remove Bob from split").performScrollTo().performClick()
+            rule.onNodeWithText("Add or manage people").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Include Bob in split").performClick()
+            rule.onNodeWithText("Done").performClick()
             rule.onAllNodesWithText("₹450.00").assertCountEquals(2)
-            rule.onNodeWithText("Choose an existing person").performScrollTo().performClick()
+            rule.onNodeWithText("Add or manage people").performScrollTo().performClick()
             rule.onAllNodes(isToggleable()).assertCountEquals(2)
             rule.onAllNodes(isToggleable())[1].performClick()
             rule.onNodeWithText("Done").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("₹300.00").fetchSemanticsNodes().size == 3 }
-            rule.onNodeWithText("Custom").performScrollTo().performClick()
-            rule.onNodeWithText("Share for You (INR)").performScrollTo().performTextReplacement("200")
-            rule.onNodeWithText("Share for Alice (INR)").performScrollTo().performTextReplacement("400")
-            rule.onNodeWithText("Share for Bob (INR)").performScrollTo().performTextReplacement("299")
+            rule.onNodeWithText("Custom amounts").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Share for You (INR)").performScrollTo().performTextReplacement("200")
+            rule.onNodeWithContentDescription("Share for Alice (INR)").performScrollTo().performTextReplacement("400")
+            rule.onNodeWithContentDescription("Share for Bob (INR)").performScrollTo().performTextReplacement("299")
             rule.onNodeWithText("Apply split").assertIsNotEnabled()
             rule.onNodeWithText("Remaining to assign: ₹1.00").assertExists()
-            rule.onNodeWithText("Share for Bob (INR)").performTextReplacement("300")
+            rule.onNodeWithContentDescription("Share for Bob (INR)").performTextReplacement("300")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             capture("custom-split.png")
             rule.onNodeWithText("Apply split").assertIsEnabled().performClick()
@@ -104,16 +108,16 @@ class GroupSplitUiTest {
             val a = runBlocking { r.addLocalMember("Alice") }; val b = runBlocking { r.addLocalMember("Bob") }
             runBlocking { r.saveGroupSplit(id, 30000, listOf(MemberShareInput(a.id, 30000), MemberShareInput(b.id, 30000)), r.get(id)!!.updatedAt) }
             rule.setContent { FinanceMinistryTheme { RepaymentsScreen(r, LocalDate.now(), {}, {}) } }
-            rule.waitUntil(15000) { rule.onAllNodesWithText("Still owed · all dates").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Still owed to you · all dates").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Alice"))
             capture("people-balances.png")
             rule.onNodeWithText("Alice").performClick()
-            rule.onNodeWithText("Record money received").performScrollTo().performClick()
+            rule.onNodeWithText("Record repayment").assertIsDisplayed().performClick()
             rule.onNodeWithText("Received cash").performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performTextReplacement("100")
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextReplacement("100")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             capture("individual-settlement.png")
-            rule.onNodeWithText("Save repayment").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().performClick()
             rule.waitUntil(15000) { runBlocking { r.repaymentsFor(id).size == 1 } }
             val repayments = runBlocking { r.repaymentsFor(id) }
             assertEquals(a.id, repayments.single().memberId)
@@ -128,15 +132,15 @@ class GroupSplitUiTest {
         var done = false
         try {
             rule.setContent { FinanceMinistryTheme { Surface(Modifier.fillMaxSize()) { TransactionForm(r, null, { done = true }) } } }
-            rule.onNodeWithText("Amount (INR)").performTextInput("900")
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("900")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.onNodeWithText("Group").performScrollTo().performClick()
-            rule.onNodeWithText("Group name").performScrollTo().performTextInput("Friends")
+            rule.onNode(editableLedgerField("Group name")).performScrollTo().performTextInput("Friends")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.onNodeWithText("Split with people").performScrollTo().performClick()
             addPerson("Alice"); addPerson("Bob")
             rule.onNodeWithText("Apply split").performClick()
-            rule.onNodeWithText("Save transaction").performClick()
+            rule.onNode(hasText("Add payment") and hasClickAction()).performClick()
             rule.waitUntil(15000) { done }
             val row = runBlocking { r.snapshot().rows.single() }
             assertEquals(30000L, row.personalShareMinor); assertEquals(2, runBlocking { r.groupSharesFor(row.id).size })
@@ -156,15 +160,16 @@ class GroupSplitUiTest {
                 if (showing.value) GroupSplitEditor(r, 90000, 30000, inputs, { _, _ -> fail("Discard must not save") }, { showing.value = false })
             } }
             rule.waitUntil(15000) { rule.onAllNodes(hasText("Apply split") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Share for You (INR)").performScrollTo().performTextReplacement("250")
-            rule.onNodeWithText("Share for Alice (INR)").performScrollTo().performTextReplacement("350")
+            rule.onNodeWithText("Custom amounts").performClick()
+            rule.onNodeWithContentDescription("Share for You (INR)").performScrollTo().performTextReplacement("250")
+            rule.onNodeWithContentDescription("Share for Alice (INR)").performScrollTo().performTextReplacement("350")
             androidx.test.espresso.Espresso.closeSoftKeyboard()
             restoration.emulateSavedInstanceStateRestore()
             rule.onNodeWithText("250").assertExists(); rule.onNodeWithText("350").assertExists()
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithContentDescription("Close group split").performClick()
             rule.onNodeWithText("Keep editing").performClick()
             rule.onNodeWithText("250").assertExists()
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithContentDescription("Close group split").performClick()
             rule.onNodeWithText("Discard changes").performClick()
             assertFalse(showing.value)
             assertEquals(30000L, runBlocking { r.get(id)!!.personalShareMinor })
@@ -179,13 +184,15 @@ class GroupSplitUiTest {
                 if (showing.value) GroupSplitEditor(r, 90000, 30000, emptyList(),
                     { own, shares -> r.saveGroupSplit(id, own, shares, r.get(id)!!.updatedAt) }, { showing.value = false })
             } }
-            rule.waitUntil(15000) { rule.onAllNodes(hasText("Choose an existing person") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Choose an existing person").performScrollTo().performClick()
+            rule.waitUntil(15000) { rule.onAllNodes(hasText("Add or manage people") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Add or manage people").performScrollTo().performClick()
             rule.onNodeWithText("Rename").performClick()
-            rule.onNodeWithText("Local name").performTextReplacement("Alice home")
+            rule.onNode(editableLedgerField("Local name")).performTextReplacement("Alice home")
             rule.onNodeWithText("Save name").performClick()
-            rule.waitUntil(15000) { rule.onAllNodesWithText("Alice home").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNode(isToggleable()).performClick()
+            // The rename input already contains this text before the async save;
+            // wait for the renamed, persisted person choice instead of that input.
+            rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Include Alice home in split").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithContentDescription("Include Alice home in split").performClick().assertIsOn()
             rule.onNodeWithText("Done").performClick()
             rule.onAllNodesWithText("₹450.00").assertCountEquals(2)
             try {
@@ -209,11 +216,11 @@ class GroupSplitUiTest {
                 r.recordRepayment(id, "300", System.currentTimeMillis(), "Alice", memberId = a.id)
             }
             rule.setContent { FinanceMinistryTheme { RepaymentsScreen(r, LocalDate.now(), {}, {}) } }
-            rule.waitUntil(15000) { rule.onAllNodesWithText("Still owed · all dates").fetchSemanticsNodes().isNotEmpty() }
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Still owed to you · all dates").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Settled").performScrollTo().performClick()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Alice"))
             rule.onNodeWithText("Alice").assertIsDisplayed()
-            rule.onNodeWithText("No settled expenses in this view.").assertDoesNotExist()
+            rule.onNodeWithText("No balances here").assertDoesNotExist()
             rule.onNodeWithText("Bob").assertDoesNotExist()
             capture("settled-person.png")
         } finally { runBlocking { r.eraseAll(); r.close() } }
@@ -234,20 +241,20 @@ class GroupSplitUiTest {
                 if (showing.value) RepaymentEditor(r, row, null, { showing.value = false }, a.id)
             } }
             rule.waitUntil(15000) { rule.onAllNodesWithText("600.00").fetchSemanticsNodes().isNotEmpty() }
-            rule.onNodeWithText("Cancel").performClick()
+            rule.onNodeWithContentDescription("Close repayment editor").performClick()
             rule.onNodeWithText("Discard repayment changes?").assertDoesNotExist()
             rule.runOnIdle { showing.value = true }
             rule.waitUntil(15000) { rule.onAllNodesWithText("600.00").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Received cash").performScrollTo().performClick()
-            rule.onNodeWithText("Repayment amount (INR)").performScrollTo().performClick().performTextReplacement("100")
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performScrollTo().performClick().performTextReplacement("100")
             val automation = instrumentation.uiAutomation
             automation.serviceInfo = automation.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
             rule.waitUntil(10000) { automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }
             val keyboard = android.graphics.Rect()
             automation.windows.first { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }.getBoundsInScreen(keyboard)
-            val save = rule.onNodeWithText("Save repayment").fetchSemanticsNode().boundsInWindow
+            val save = rule.onNodeWithText("Record cash repayment").fetchSemanticsNode().boundsInWindow
             assertTrue("Save overlaps keyboard", save.bottom <= keyboard.top)
-            rule.onNodeWithText("Save repayment").assertIsDisplayed()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed()
             capture("individual-keyboard.png")
         } finally {
             shell(if (oldKeyboard == "null") "settings delete secure show_ime_with_hard_keyboard" else "settings put secure show_ime_with_hard_keyboard $oldKeyboard")

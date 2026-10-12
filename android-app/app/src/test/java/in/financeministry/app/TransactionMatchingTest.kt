@@ -53,6 +53,25 @@ class TransactionMatchingTest {
         assertTrue(TransactionMatching.suggest(listOf(row("a"), row("b", "savings").copy(direction = "Credit")), aliases).isEmpty())
     }
 
+    @Test fun reference_and_masked_suffix_do_not_override_conflicting_registered_sources() {
+        val first = row("a").copy(referenceHash = ByteArray(32) { 1 }, maskedAccountHint = "••••1234")
+        val second = row("b", "savings").copy(referenceHash = ByteArray(32) { 1 }, maskedAccountHint = "••••1234")
+        assertTrue(TransactionMatching.suggest(listOf(first, second), sources).isEmpty())
+        assertEquals(MatchKind.Duplicate, TransactionMatching.suggest(
+            listOf(first, second.copy(paymentSourceId = "daily")), sources).single().kind)
+    }
+
+    @Test fun reference_alone_never_overrides_instrument_or_time_conflicts() {
+        val base = row("a", null).copy(referenceHash = ByteArray(32) { 3 }, maskedAccountHint = "••••1234")
+        val same = base.copy(id = "b")
+        assertEquals(MatchKind.Duplicate, TransactionMatching.suggest(listOf(base, same), sources).single().kind)
+        listOf(same.copy(maskedAccountHint = "••••9999"), same.copy(channel = "Card"),
+            same.copy(currency = "USD"), same.copy(effectiveTimestamp = 1_300_001),
+            same.copy(amountMinor = 45001)).forEach {
+            assertTrue(TransactionMatching.suggest(listOf(base, it), sources).isEmpty())
+        }
+    }
+
     @Test fun uncertain_failed_reversed_adjustments_and_already_resolved_rows_are_excluded() {
         val base = row("a")
         val variants = listOf(base.copy(reviewState = "NeedsReview"), base.copy(status = "Failed"),

@@ -1,10 +1,13 @@
 package `in`.financeministry.app.feature
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import `in`.financeministry.app.data.*
 import `in`.financeministry.app.money
@@ -39,13 +42,19 @@ internal fun GroupSharesPanel(repository: TransactionRepository, expense: Transa
         shares.sortedBy { members.firstOrNull { m -> m.id == it.memberId }?.name }.forEach { share ->
             val name = members.firstOrNull { it.id == share.memberId }?.name ?: "Local person"
             val owed = GroupSplitAccounting.owed(share, receipts)
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    Text(if (owed == 0L) "Settled" else "Owes ${money(owed)}", style = MaterialTheme.typography.titleMedium)
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val dark = MaterialTheme.colorScheme.background.red < .5f
+                    Surface(Modifier.size(44.dp), shape = CircleShape, color = if (dark) Color(0xFF332E43) else Color(0xFFECE6F7), contentColor = MaterialTheme.colorScheme.onSurface) {
+                        Box(contentAlignment = Alignment.Center) { Text(name.take(1).uppercase(), style = MaterialTheme.typography.titleSmall) }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = MaterialTheme.typography.titleSmall)
+                        Text("Share ${money(share.amountMinor)} · Received ${money(share.amountMinor - owed)}", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(if (owed == 0L) "Settled" else "Owes ${money(owed)}", Modifier.widthIn(max = 140.dp), style = MaterialTheme.typography.titleSmall)
                 }
-                Text("Share ${money(share.amountMinor)} · Received ${money(share.amountMinor - owed)}", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (owed > 0L) TextButton(onClick = { receiving = share.memberId }, enabled = ready && eligible) { Text("Record received from $name") }
             }
         }

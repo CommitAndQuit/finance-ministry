@@ -21,8 +21,8 @@ class OptionalToolsUiTest {
         val rent = runBlocking { repository.save(ManualInput("9000", Direction.Debit, System.currentTimeMillis(),
             TransactionType.Other, label = "Tools rent $marker", category = "Flat expenses")) }
         try {
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("Optional tools").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("Optional tools")
             rule.onNodeWithText("Budgets").assertExists()
             rule.onNodeWithText("+ Add budget").performClick()
             rule.onNodeWithTag("budget-category-Food").performClick()
@@ -44,7 +44,10 @@ class OptionalToolsUiTest {
             rule.onNodeWithText("Nothing is paid or recorded automatically.").assertExists()
             rule.waitUntil(10000) { rule.onAllNodesWithText("Mark paid").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Mark paid").performScrollTo().performClick()
-            rule.onNodeWithText("Tools rent $marker", substring = true).performClick()
+            // The sheet keeps Activity/Home underneath. Select the reminder's
+            // actual candidate chip, not the same payment in the dimmed ledger.
+            rule.onNode(hasText("Tools rent $marker", substring = true) and isSelectable()
+                and hasAnyAncestor(isDialog())).performClick()
             rule.onNodeWithText("Link this payment").performClick()
             rule.waitUntil(10000) { runBlocking { repository.recurringReminders().single { it.title == "Rent $marker" }.lastLinkedTransactionId == rent } }
             assertNotNull(runBlocking { repository.get(rent) })

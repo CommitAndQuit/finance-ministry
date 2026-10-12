@@ -40,10 +40,10 @@ class AppTourLifecycleUiTest {
             rule.onNodeWithText("Your private ledger").assertIsDisplayed()
             rule.onNodeWithText("After your update · rediscover your tools").assertIsDisplayed()
             rule.onNodeWithText("Skip for now").performClick()
-            rule.onNodeWithContentDescription("Open transactions").performClick()
+            rule.onNodeWithContentDescription("Open activity").performClick()
             rule.onNodeWithContentDescription("Open review tab").performClick()
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("App tour").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("App tour")
             rule.onNodeWithText("Your private ledger").assertIsDisplayed()
             rule.onNodeWithText("Skip for now").performClick()
         } finally { runBlocking { repository.eraseAll(); repository.close() } }

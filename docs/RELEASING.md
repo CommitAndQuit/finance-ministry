@@ -59,12 +59,30 @@ Use a dedicated emulator, not a personal phone. The instrumentation suite tempor
 creates sample rows and grants SMS/notification permissions. It cleans its own rows;
 Android permission grants can remain afterward.
 
-Standard tests: `./gradlew connectedDebugAndroidTest`. One host-driven SMS test is
-intentionally skipped in that command because it needs a coordinated emulator SMS.
+Standard tests: `./gradlew connectedDebugAndroidTest`. Explicit host-dependent
+checks are intentionally skipped unless their runner arguments and prerequisites
+are supplied: system SMS delivery, real inbox import, signed APK upgrade, ordinary
+process-restart SMS recovery, external parser-corpus evaluation and the explicit
+Home denied-permission recovery check. A green standard
+suite does not prove those paths; run and record their separate checks as well.
 
-To run that test, target the emulator and add
+For Home permission recovery, run `HomeSafetyUiTest` separately on the disposable
+emulator with `runHomeDeniedPermission=true` and RECEIVE_SMS denied before starting
+instrumentation. A fresh ordinary install without `-g` starts denied; if the app
+already has the grant, revoke it before the test, never while instrumentation is
+running. The check asserts the actual permission state, Home's blocked-access cue,
+navigation to SMS settings and unchanged existing ledger values. The same class
+also checks manual recovery after capture errors and backup-reminder eligibility,
+fresh-backup suppression, persisted dismissal and snooze expiry. Its composition
+reopening check does not replace the separate ordinary-process-restart protocol.
+
+To run the system-SMS check, target the emulator and add
 `-Pandroid.testInstrumentationRunnerArguments.class=in.financeministry.app.SmsBroadcastE2eTest`
 and `-Pandroid.testInstrumentationRunnerArguments.runSmsE2e=true`. While it runs,
+also pass `-Pandroid.testInstrumentationRunnerArguments.expectedReviewState=NeedsReview`
+for the numeric console origin below. Numeric, absent or implausible SMS origins
+are captured for review; they must not silently enter money totals. This is a
+conservative origin-format check, not proof that an alphanumeric header is genuine.
 wait until `adb -s emulator-5554 shell run-as in.financeministry.app test -f files/synthetic_sms_test_ready`
 returns exit code 0, then send exactly one synthetic message:
 
@@ -75,20 +93,54 @@ adb -s emulator-5554 emu sms send 5551234 "INR 314.15 debited from your account 
 The test has a 45-second receive window and checks receiver → encrypted record →
 notification. Ordinary service calls and JVM parsing do not prove that platform path.
 
+For a host-driven check with an invented alphabetic service header, install the
+matching app and test APKs on the disposable emulator, then run:
+
+```powershell
+pwsh -File tools/verify-sms-e2e.ps1 -AdbPath PATH_TO_ADB -Serial emulator-5554 -SenderProfile ServiceHeader
+```
+
+This profile uses the fictional sender `EXBANK`; it checks Android's exact decoded
+origin, an AutoRecorded synthetic payment and its notification. The default
+`Numeric` profile checks the exact numeric sender and requires NeedsReview. These
+are separate instrumentation runs, not parser-only tests. Header syntax is not bank
+authentication, and success does not establish support for every carrier/header or
+physical-device delivery. A raw-PDU console acknowledgement alone is not proof of
+receipt. Do not run either driver concurrently with Gradle instrumentation.
+
 ## Downloads and future production builds
 
 ### Signed upgrade verification
 
 Use a disposable emulator with no personal ledger and always select its explicit
-ADB serial. Install the published previous APK first. Build the candidate and its
-instrumentation APK with the same dedicated alpha signer; never install an ordinary
-developer-signed build over an official alpha.
+ADB serial. Install the published previous APK first. Build the previous version's
+matching instrumentation APK from its source revision with the dedicated alpha
+signer. Separately build the candidate and its matching instrumentation APK with
+that same signer; never install an ordinary developer-signed build over an official
+alpha.
 
-Install the matching test APK with `adb -s SERIAL install -t TEST_APK`, then run:
+Test APKs call the app's compiled methods. Do not assume the candidate's test APK
+can seed the previous app: changed Kotlin method signatures can make those binaries
+incompatible even when the database migration is correct. Use the previous tests
+for `seed`, then replace only the test APK with the candidate's tests for `verify`.
+Check that the candidate's schema-version assertion matches its declared Room
+version; do not leave a previous version's assertion in the verification stage.
+
+The draft workflow retains `signed-upgrade-test-apks` for seven days in Actions.
+It contains the candidate's test APK and the matching test APK built from the
+highest-version-code previous alpha tag, both using the persistent alpha signer.
+These are test harnesses, not user downloads; do not attach them to the release.
+Use the published previous app APK and the draft candidate app APK for the actual
+upgrade. Verify all APK certificate identities before installing. Creating this
+artifact does not itself run or pass the upgrade test.
+
+Run the stages without uninstalling or clearing the app:
 
 ```sh
+adb -s SERIAL install -t PREVIOUS_TEST_APK
 adb -s SERIAL shell am instrument -w -e class in.financeministry.app.OfficialUpgradeTest -e upgradeStage seed in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner
 adb -s SERIAL install -r CANDIDATE_APK
+adb -s SERIAL install -r -t CANDIDATE_TEST_APK
 adb -s SERIAL shell am instrument -w -e class in.financeministry.app.OfficialUpgradeTest -e upgradeStage verify in.financeministry.app.test/androidx.test.runner.AndroidJUnitRunner
 ```
 

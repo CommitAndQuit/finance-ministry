@@ -1,29 +1,30 @@
 package `in`.financeministry.app
 
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Rule
 import org.junit.Test
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 
 class LedgerUxTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
 
     @Test fun bottom_navigation_separates_overview_transactions_and_review() {
-        rule.onNodeWithContentDescription("Open overview").assertIsDisplayed()
-        rule.onNodeWithContentDescription("Open transactions").assertIsDisplayed().performClick()
-        rule.onNodeWithText("Select").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Open home").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Open activity").assertIsDisplayed().performClick()
+        rule.onNodeWithText("Select").assertDoesNotExist()
         rule.onNodeWithText("Filters").assertIsDisplayed()
         rule.onNodeWithText("Search transactions").assertDoesNotExist()
-        rule.waitUntil(15000) { rule.onAllNodesWithText("Results totals").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Results totals").performClick()
-        rule.onNodeWithText("Matching transaction totals").assertIsDisplayed()
-        rule.onNodeWithText("Close").performClick()
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Totals").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Totals").performClick()
+        rule.onNodeWithText("Matching totals").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Close matching totals").performClick()
         rule.onNodeWithContentDescription("Open review tab").assertIsDisplayed().performClick()
-        rule.onNodeWithText("Review queue").assertIsDisplayed()
+        rule.onNode(hasText("Review") and !hasClickAction()).assertIsDisplayed()
     }
 
     @Test fun compact_add_action_is_accessible_and_opens_manual_entry() {
@@ -31,12 +32,12 @@ class LedgerUxTest {
             rule.onNodeWithText("Skip for now").performClick()
         }
         rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed().performClick()
-        rule.onNodeWithText("Amount (INR)").assertIsDisplayed()
+        rule.onNode(editableLedgerField("Amount (INR)")).assertIsDisplayed()
         rule.onNodeWithText("More details").assertIsDisplayed()
-        rule.onNodeWithText("Save transaction").assertIsDisplayed()
+        rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
         rule.onNodeWithText("More details").performClick()
-        rule.onNodeWithText("Save transaction").assertIsDisplayed()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
     }
 
     @Test fun personalization_updates_the_home_greeting() {
@@ -44,20 +45,21 @@ class LedgerUxTest {
         val original = repository.preferences.getString("preferred_name", "").orEmpty()
         try {
             repository.preferences.edit().putString("preferred_name", "").commit()
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("Personalization").performScrollTo().assertIsDisplayed().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("Personalization")
             rule.onNodeWithText("Preferred name").performTextInput("Asha")
             rule.onNodeWithText("Save name").performClick()
-            rule.onNodeWithText("Home").performClick()
+            rule.onNodeWithContentDescription("Close settings").performClick()
             rule.onNodeWithText("Hi, Asha").assertIsDisplayed()
         } finally { repository.preferences.edit().putString("preferred_name", original).commit() }
     }
 
-    private fun openFilters() {
-        rule.onNodeWithContentDescription("Open transactions").performClick()
+    private fun openFilters(advanced: Boolean = true) {
+        rule.onNodeWithContentDescription("Open activity").performClick()
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Filter transactions"))
         rule.onNodeWithContentDescription("Filter transactions").assertIsDisplayed().performClick()
-        rule.onNodeWithText("Filter transactions").assertIsDisplayed()
+        rule.onNodeWithText("Filter activity").assertIsDisplayed()
+        if (advanced) rule.openAdvancedFilters()
     }
 
     @Test fun category_filters_support_multiple_choices_reopening_and_clearing() {
@@ -70,20 +72,22 @@ class LedgerUxTest {
             }
         }
         try {
-            openFilters()
+            openFilters(advanced = false)
+            rule.openFilterCategories()
             rule.onNode(hasText("Bills") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
             rule.onNode(hasText("Flat expenses") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Filter fixture Bills").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Filter fixture Bills"))
             rule.onNodeWithText("Filter fixture Bills").assertIsDisplayed()
             rule.onNodeWithText("Filter fixture Food").assertDoesNotExist()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Filter transactions"))
-            openFilters()
+            openFilters(advanced = false)
+            rule.openFilterCategories()
             rule.onNode(hasText("Bills") and hasAnyAncestor(isDialog())).performScrollTo().assertIsSelected()
             rule.onNode(hasText("Flat expenses") and hasAnyAncestor(isDialog())).performScrollTo().assertIsSelected()
             rule.onNode(hasText("Bills") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) {
                 rule.onAllNodesWithText("Filter fixture Flat expenses").fetchSemanticsNodes().isNotEmpty() &&
                     rule.onAllNodesWithText("Filter fixture Bills").fetchSemanticsNodes().isEmpty()
@@ -99,35 +103,35 @@ class LedgerUxTest {
     }
 
     @Test fun monthly_cash_flow_is_visible_and_totals_help_opens_from_info_icon() {
-        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out · month").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Money out · month").assertIsDisplayed()
-        rule.onNodeWithText("Money in · month").assertIsDisplayed()
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Money out").assertIsDisplayed()
+        rule.onNodeWithText("Money in").assertIsDisplayed()
         rule.onNodeWithText("How totals work").assertDoesNotExist()
         rule.onNodeWithContentDescription("How totals work").performClick()
-        rule.onNodeWithText("How totals work").assertIsDisplayed()
+        rule.onNodeWithText("Your month, explained").assertIsDisplayed()
         rule.onNodeWithText("Got it").performClick()
-        rule.onNodeWithText("How totals work").assertDoesNotExist()
+        rule.onNodeWithText("Your month, explained").assertDoesNotExist()
     }
 
     @Test fun overview_uses_the_monthly_summary_hierarchy() {
-        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out · month").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Whole month").assertIsDisplayed()
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText(java.time.YearMonth.now().format(java.time.format.DateTimeFormatter.ofPattern("MMMM uuuu"))).assertIsDisplayed()
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Still owed to you"))
         rule.onNodeWithText("Still owed to you").assertIsDisplayed()
-        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Outstanding from selected month"))
-        rule.onNodeWithContentDescription("Outstanding from selected month").assertIsDisplayed()
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Open repayments"))
+        rule.onNode(hasContentDescription("Open repayments") and hasText("from this month", substring = true)).assertIsDisplayed()
     }
 
     @Test fun settings_are_separate_and_return_to_home() {
         rule.onNodeWithText("Erase all local data").assertDoesNotExist()
-        rule.onNodeWithText("Settings").performClick()
-        rule.onNodeWithText("SMS & notifications").performClick()
+        rule.onNodeWithContentDescription("Settings").performClick()
+        rule.openSettingsTool("SMS & notifications")
         rule.onNodeWithText("Recording notifications").assertExists()
-        rule.onNodeWithText("Back").performClick()
-        rule.onNodeWithText("Data and privacy").performScrollTo().assertIsDisplayed().performClick()
+        rule.onNodeWithContentDescription("Back to settings").performClick()
+        rule.openSettingsTool("Data and privacy")
         rule.onNodeWithText("Erase all local data").performScrollTo().assertExists()
-        rule.onNodeWithText("Back").performClick()
-        rule.onNodeWithText("Home").performClick()
+        rule.onNodeWithContentDescription("Back to settings").performClick()
+        rule.onNodeWithContentDescription("Close settings").performClick()
         rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
     }
 
@@ -137,11 +141,11 @@ class LedgerUxTest {
         try {
             openFilters()
             rule.onNode(hasText("Added manually") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Added manually").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Added manually"))
             rule.onNodeWithText("Added manually").assertIsDisplayed().performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             val transactionRow = hasText("₹71.23") and hasClickAction()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(transactionRow)
             rule.onNode(transactionRow).assertIsDisplayed()
@@ -156,15 +160,15 @@ class LedgerUxTest {
         try {
             openFilters()
             rule.onNode(hasText("Money out") and hasAnyAncestor(isDialog())).performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(debitLabel))
             rule.onNodeWithText(debitLabel).assertIsDisplayed()
             rule.onNodeWithText(creditLabel).assertDoesNotExist()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Filter transactions"))
             openFilters()
-            rule.onNodeWithText("Money in").performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNode(hasText("Money in") and hasAnyAncestor(isDialog())).performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(creditLabel))
             rule.onNodeWithText(creditLabel).assertIsDisplayed()
@@ -189,7 +193,7 @@ class LedgerUxTest {
                 System.currentTimeMillis(), `in`.financeministry.app.core.model.TransactionType.Other, label = "Source filter other $suffix")) }
             openFilters()
             rule.onNode(hasText(sourceName) and hasAnyAncestor(isDialog())).performScrollTo().performClick()
-            rule.onNodeWithText("Apply").performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Source filter match $suffix"))
             rule.onNodeWithText("Source filter match $suffix").assertIsDisplayed()
@@ -210,10 +214,11 @@ class LedgerUxTest {
         val credit = runBlocking { repository.save(`in`.financeministry.app.data.ManualInput("56.78", `in`.financeministry.app.core.model.Direction.Credit, System.currentTimeMillis(), `in`.financeministry.app.core.model.TransactionType.Other, label = creditLabel)) }
         val other = runBlocking { repository.save(`in`.financeministry.app.data.ManualInput("9.99", `in`.financeministry.app.core.model.Direction.Debit, System.currentTimeMillis(), `in`.financeministry.app.core.model.TransactionType.Other, label = otherLabel)) }
         try {
-            rule.onNodeWithContentDescription("Open transactions").performClick()
+            rule.onNodeWithContentDescription("Open activity").performClick()
             rule.onNodeWithContentDescription("Filter transactions").performClick()
-            rule.onNodeWithText("Search transactions").performTextInput("Needle")
-            rule.onNodeWithText("Apply").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Search transactions").performScrollTo().performTextInput("Needle")
+            rule.onNodeWithText("Show transactions").performClick()
             rule.waitUntil(15000) { rule.onAllNodesWithText("2 transactions").fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(debitLabel))
             rule.onNodeWithText(debitLabel).assertIsDisplayed()
@@ -225,18 +230,18 @@ class LedgerUxTest {
 
     @Test fun cancel_changed_form_keeps_draft_until_discard_confirmed() {
         rule.onNodeWithContentDescription("Add transaction").performClick()
-        rule.onNodeWithText("Amount (INR)").performTextInput("42.00")
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("42.00")
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
         rule.onNodeWithText("Keep editing").performClick()
         rule.onNodeWithText("42.00").assertExists()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
         rule.onNodeWithText("Discard changes").performClick()
         rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
     }
 
     @Test fun review_reminder_navigation_does_not_discard_a_dirty_form() {
         rule.onNodeWithContentDescription("Add transaction").performClick()
-        rule.onNodeWithText("Amount (INR)").performTextInput("43.21")
+        rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("43.21")
         rule.activityRule.scenario.onActivity { it.requestReview() }
         rule.onNodeWithText("Open review queue?").assertIsDisplayed()
         rule.onNodeWithText("Keep editing").performClick()
@@ -248,12 +253,13 @@ class LedgerUxTest {
         val before = runBlocking { repository.snapshot().rows.map { it.id }.toSet() }
         try {
             rule.onNodeWithContentDescription("Add transaction").performClick()
-            rule.onNodeWithText("Amount (INR)").performTextInput("62.19")
-            rule.onNodeWithText("Money in").performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("62.19")
+            rule.onNode(hasText("Money in") and hasClickAction()).performClick()
             rule.activityRule.scenario.recreate()
             rule.onNodeWithText("62.19").assertExists()
-            rule.onNodeWithText("Money in").assertIsSelected()
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.onNode(hasText("Money in") and hasClickAction()).assertIsSelected()
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 6219L } } }
             val saved = runBlocking { repository.snapshot().rows.single { it.id !in before && it.amountMinor == 6219L } }
             assertEquals("Credit", saved.direction)
@@ -272,19 +278,21 @@ class LedgerUxTest {
             assertTrue(runBlocking { repository.ingest(`in`.financeministry.app.core.model.IncomingSms("SYNTHETIC", System.currentTimeMillis(), "Your account was debited via UPI.")) })
             rule.waitForIdle()
             rule.onNodeWithContentDescription("Open review tab").assertIsDisplayed().performClick()
-            val target = hasText("Amount unknown") and hasText("Money out")
+            val target = hasText("Amount unknown")
+            rule.waitUntil(15_000) { rule.onAllNodes(target).fetchSemanticsNodes().isNotEmpty() }
             try {
                 rule.onNode(hasScrollToNodeAction()).performScrollToNode(target)
             } catch (failure: Throwable) {
                 throw AssertionError("Review row did not appear. UI state: ${rule.onRoot().printToString()}", failure)
             }
-            rule.onNode(target).performClick()
-            rule.onNodeWithText("Check this transaction").assertExists()
-            rule.onNodeWithText("Edit / confirm").performClick()
-            rule.onNodeWithText("Money out").assertIsSelected()
-            rule.onNodeWithText("Amount (INR)").performTextInput("81.25")
+            rule.onNode(hasText("Check & confirm") and hasClickAction() and hasAnySibling(target))
+                .performScrollTo().performClick()
+            rule.onNodeWithText("Check this payment").assertExists()
+            rule.onNode(hasText("Money out") and hasClickAction()).assertIsSelected()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("81.25")
             rule.onNodeWithText("Transaction type — please choose: Not identified").assertDoesNotExist()
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitForIdle()
             try {
                 rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 8125L && it.reviewState == "Confirmed" } } }
@@ -318,15 +326,17 @@ class LedgerUxTest {
             assertEquals(originalId, runBlocking { repository.get(reversalId!!)!!.linkedOriginalId })
 
             rule.waitForIdle()
-            rule.onNodeWithContentDescription("Open transactions").performClick()
-            val linkedCards = hasText("₹42.00") and hasText("Money out")
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            val linkedCards = hasText("₹42") and hasClickAction()
+            rule.waitUntil(15_000) { rule.onAllNodes(linkedCards).fetchSemanticsNodes().size == 2 }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(linkedCards)
-            rule.onAllNodes(linkedCards)[1].performClick()
+            rule.onAllNodes(linkedCards)[1].performTouchInput { longClick() }
             rule.onNodeWithText("Edit / confirm").performClick()
-            rule.onNodeWithText("Category: Other").performScrollTo().performClick()
+            rule.onNode(publicEditorChoice("Category", "Other")).performScrollTo().performClick()
             rule.onNodeWithText("Food").performClick()
             rule.onNodeWithText("Transaction type — please choose: Not identified").assertDoesNotExist()
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             try {
                 rule.waitUntil(15_000) { rule.onAllNodesWithContentDescription("Add transaction").fetchSemanticsNodes().isNotEmpty() }
             } catch (failure: Throwable) {
@@ -361,20 +371,29 @@ class LedgerUxTest {
             assertEquals("NeedsReview", runBlocking { repository.get(transactionId!!)!!.reviewState })
             sourceId = runBlocking { repository.addPaymentSource(nickname, "Bank account", `in`.financeministry.app.core.model.Channel.UPI, "Test bank", "6789").id }
 
-            // Wait for the all-dates queue refresh, rather than racing the Overview's
-            // asynchronous month snapshot immediately after ingest/source creation.
-            val pendingCount = runBlocking { repository.reviewCount() }
-            rule.onNodeWithContentDescription("Open review tab").performClick()
+            // Review cards lead to confirmation. Activity's pending rows also offer
+            // the source-only details path, which must leave this payment unconfirmed.
+            val beforeAssignment = runBlocking { repository.get(transactionId!!)!! }
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            val pendingRow = hasText("+₹87.65") and hasClickAction()
             rule.waitUntil(15_000) {
-                rule.onAllNodesWithText("All dates · $pendingCount remaining").fetchSemanticsNodes().isNotEmpty()
+                rule.onAllNodes(pendingRow).fetchSemanticsNodes().isNotEmpty()
             }
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("₹87.65"))
-            rule.onNodeWithText("₹87.65").performClick()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(pendingRow)
+            rule.onNode(pendingRow).performClick()
             rule.onNodeWithText("Choose payment source").performClick()
             rule.onNodeWithText("This only assigns a source. It won’t confirm or change the transaction.").assertExists()
             rule.onNodeWithText(nickname).performClick()
             rule.waitUntil(10_000) { runBlocking { repository.get(transactionId!!)!!.paymentSourceId } == sourceId }
-            assertEquals("NeedsReview", runBlocking { repository.get(transactionId!!)!!.reviewState })
+            val afterAssignment = runBlocking { repository.get(transactionId!!)!! }
+            assertEquals("NeedsReview", afterAssignment.reviewState)
+            // Room recreates byte arrays, so compare evidence by content rather than
+            // data-class reference equality while preserving every other field.
+            assertArrayEquals(beforeAssignment.sourceFingerprint, afterAssignment.sourceFingerprint)
+            assertArrayEquals(beforeAssignment.referenceHash, afterAssignment.referenceHash)
+            assertEquals(beforeAssignment.copy(paymentSourceId = sourceId, updatedAt = afterAssignment.updatedAt,
+                sourceFingerprint = null, referenceHash = null),
+                afterAssignment.copy(sourceFingerprint = null, referenceHash = null))
             rule.onNodeWithText("Check this transaction").assertExists()
             rule.onNodeWithText("Edit / confirm").assertExists()
         } finally {

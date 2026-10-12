@@ -10,8 +10,12 @@ internal object CardAlertFormats {
     // OneCard/Federal: a completed purchase names the merchant before the card,
     // sometimes preceded by a short greeting and without a transaction date.
     private val merchantFirst = Regex("""^(?:fresh picks!\s*)?$money\s+spent\s+at\s+(?<merchant>[^\r\n]{1,80}?)\s+on\s+$card(?=\.(?:\s|$)|$)""", RegexOption.IGNORE_CASE)
+    private val usedDebitCard = Regex("""^thank you for using your\s+[a-z ]{1,60}\bdebit card ending\s+(?:with\s+)?[*x•]*(?<last4>\d{4})(?!\d)\s+for\s+$money\s+towards\s+(?<merchant>[^\r\n]{1,80}?)\s+in\s+[^\r\n]{1,60}?\s+at\s+$date\s+\d{2}:\d{2}:\d{2}""", RegexOption.IGNORE_CASE)
+    private val verbFirstCard = Regex("""^spent card no\.?\s+[*x•]+(?<last4>\d{4})(?!\d)\s+$money\s+$date\s+\d{2}:\d{2}:\d{2}\s+(?<merchant>[^\r\n]{1,80}?)\s+avl\s+(?:lmt|limit)\b""", RegexOption.IGNORE_CASE)
+    private val completedGeneric = Regex("""^$money\s+has been spent on your card\s+[*x•]+(?<last4>\d{4})(?!\d)\s+at\s+(?<merchant>[^.\r\n]{1,80})\.(?:\s|$)""", RegexOption.IGNORE_CASE)
     private val layouts = listOf(
         merchantFirst,
+        usedDebitCard, verbFirstCard, completedGeneric,
         // HDFC/SBI/BOBCARD/Federal and similar: merchant precedes the date.
         Regex("""$start(?:\s+for\s+[^\r\n]{1,50}?)?\s+at\s+(?<merchant>[^\r\n]{1,80}?)\s+on\s+$date""", RegexOption.IGNORE_CASE),
         // Kotak: the date precedes the merchant.
@@ -20,6 +24,7 @@ internal object CardAlertFormats {
         Regex("""$start\s+@(?<merchant>[^\r\n]{1,80}?)\s+$date""", RegexOption.IGNORE_CASE)
     )
     fun match(text: String): MatchResult? = layouts.firstNotNullOfOrNull { it.find(text) }
-    fun hasMovement(text: String): Boolean = movement.containsMatchIn(text) || merchantFirst.containsMatchIn(text)
+    fun hasMovement(text: String): Boolean = movement.containsMatchIn(text) || merchantFirst.containsMatchIn(text) ||
+        usedDebitCard.containsMatchIn(text) || verbFirstCard.containsMatchIn(text) || completedGeneric.containsMatchIn(text)
     val foreignAmount = Regex("""(?:\b(?:usd|eur|gbp|aed|sgd|aud|cad|jpy|chf|sar|hkd|cny)|[$€£])\s*\d""", RegexOption.IGNORE_CASE)
 }

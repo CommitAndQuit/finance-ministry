@@ -220,6 +220,15 @@ class FinancialSmsParserTest {
         assertNull(parse("INR 42 debited from account XX00001").maskedAccountHint)
     }
 
+    @Test fun masked_acct_layout_extracts_only_four_digit_hint() {
+        assertEquals("••••0000", parse("INR 42 debited from Acct XX0000 via UPI").maskedAccountHint)
+        assertEquals("••••0000", parse("INR 42 debited from Acct. XX0000 via UPI").maskedAccountHint)
+        assertNull(parse("INR 42 debited from Acct XX000 via UPI").maskedAccountHint)
+        assertNull(parse("INR 42 debited from Acct 123456789012 via UPI").maskedAccountHint)
+        assertNull(parse("INR 42 debited from account XX0000ABC via UPI").maskedAccountHint)
+        assertNull(parse("INR 42 transferred between your own accounts XX0000 and Acct XX9999").maskedAccountHint)
+    }
+
     @Test fun balance_only_and_security_messages_remain_rejected() {
         listOf("AvlBal: Rs1234.56", "Avail. Bal INR 42", "Not You? SMS BLOCK UPI to 0000000000").forEach {
             assertEquals(it, ParseDecision.Reject, parse(it).decision)

@@ -69,7 +69,7 @@ class GroupSplitRepositoryTest {
             val bytes = r.createEncryptedBackup("long-test-only-password".toCharArray())
             val plain = BackupCipher.decrypt(bytes, "long-test-only-password".toCharArray())
             val root = try { JSONObject(plain.toString(Charsets.UTF_8)) } finally { plain.fill(0) }
-            assertEquals(8, root.getInt("schema"))
+            assertEquals(9, root.getInt("schema"))
             assertEquals(2, root.getJSONObject("data").getJSONObject("tables").getJSONArray("local_members").length())
             val preview = restored.previewBackup(bytes, "long-test-only-password".toCharArray())
             assertEquals(2, preview.memberCount); assertEquals(2, preview.groupShareCount)
@@ -120,6 +120,7 @@ class GroupSplitRepositoryTest {
             root.put("schema", 7)
             val tables = root.getJSONObject("data").getJSONObject("tables")
             tables.remove("local_members"); tables.remove("group_shares")
+            tables.remove("group_presets"); tables.remove("group_preset_members")
             val repayments = tables.getJSONArray("repayments")
             for (i in 0 until repayments.length()) repayments.getJSONObject(i).remove("memberId")
             val legacy = BackupCipher.encrypt(root.toString().toByteArray(), "long-test-only-password".toCharArray())

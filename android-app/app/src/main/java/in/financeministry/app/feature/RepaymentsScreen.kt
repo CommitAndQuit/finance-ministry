@@ -5,180 +5,255 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import `in`.financeministry.app.data.*
 import `in`.financeministry.app.money
 import `in`.financeministry.app.transactionTime
+import `in`.financeministry.app.ui.LedgerIcon
+import `in`.financeministry.app.ui.LedgerChoiceChip
+import `in`.financeministry.app.ui.compactMoney
 import java.math.BigInteger
-import java.time.Instant
 import java.time.LocalDate
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
+/** Standalone entry point retained for transaction-details navigation and UI tests. */
 @Composable
 fun RepaymentsScreen(repository: TransactionRepository, month: LocalDate, onBack: () -> Unit,
     onExpense: (String) -> Unit) {
+    BackHandler(onBack = onBack)
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.safeDrawingPadding().fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("People", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
+                TextButton(onClick = onBack) { Text("Back") }
+            }
+            PeopleContent(repository, month, {}, onExpense)
+        }
+    }
+}
+
+/** The host owns the toolbar and bottom navigation; this owns only People content and its sheets. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun PeopleContent(repository: TransactionRepository, month: LocalDate, onChanged: () -> Unit,
+    onOpenTransaction: (String) -> Unit) {
     val revision by repository.revision.collectAsState()
     var summary by remember { mutableStateOf<RepaymentSummary?>(null) }
     var error by remember { mutableStateOf(false) }
     var retry by remember { mutableIntStateOf(0) }
     var settled by rememberSaveable { mutableStateOf(false) }
-    var monthOnly by rememberSaveable { mutableStateOf(false) }
-    var group by rememberSaveable { mutableStateOf<String?>(null) }
+    var personId by rememberSaveable { mutableStateOf<String?>(null) }
     var recordingId by rememberSaveable { mutableStateOf<String?>(null) }
     var recordingMemberId by rememberSaveable { mutableStateOf<String?>(null) }
-    var personId by rememberSaveable { mutableStateOf<String?>(null) }
-    var peopleView by rememberSaveable { mutableStateOf(true) }
+    var feedback by rememberSaveable { mutableStateOf<String?>(null) }
     var monthDetails by rememberSaveable { mutableStateOf(false) }
+    var peopleView by rememberSaveable { mutableStateOf(true) }
+    var monthOnly by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(month, revision, retry) {
         error = false
         try { summary = repository.repaymentSummary(month) }
         catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
         catch (_: Exception) { error = true }
     }
-    fun groupKey(row: TransactionEntity) = row.ownership + ":" + row.groupLabel.orEmpty().trim().lowercase(Locale.ROOT)
-    val leave = { if (personId != null) personId = null else if (group != null) group = null else onBack() }
-    BackHandler(onBack = leave)
-    Surface(Modifier.fillMaxSize()) {
-        Column(Modifier.safeDrawingPadding().fillMaxSize().padding(horizontal = 20.dp)) {
-            TextButton(onClick = leave) { Text("Back") }
-            Text("Money owed to you", style = MaterialTheme.typography.headlineMedium)
-            if (error) {
-                Text("Could not load repayments. Your ledger has not changed.")
-                TextButton(onClick = { retry++ }) { Text("Try again") }
-            } else if (summary == null) CircularProgressIndicator(Modifier.padding(24.dp))
-            else {
-                val data = summary!!
-                val monthName = month.format(DateTimeFormatter.ofPattern("MMMM uuuu"))
-                val expenses = data.expenses.filter {
-                    (RepaymentAccounting.owed(it) == 0L) == settled && (!monthOnly ||
-                        Instant.ofEpochMilli(it.effectiveTimestamp).atZone(ZoneId.systemDefault()).toLocalDate().withDayOfMonth(1) == month.withDayOfMonth(1))
+    val data = summary
+    val balancesData = data?.let { value ->
+        value.copy(expenses = value.expenses.filter { !monthOnly || Instant.ofEpochMilli(it.effectiveTimestamp)
+            .atZone(ZoneId.systemDefault()).toLocalDate().withDayOfMonth(1) == month.withDayOfMonth(1) },
+            shares = if (peopleView) value.shares else emptyList())
+    }
+    val people = balancesData?.let(RepaymentAccounting::people).orEmpty()
+    val visible = people.filter { (it.outstanding.signum() == 0) == settled }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp)) {
+        if (error) item {
+            Text("Could not load repayments. Your ledger has not changed.")
+            TextButton(onClick = { retry++ }) { Text("Try again") }
+        } else if (data == null) item { CircularProgressIndicator(Modifier.padding(24.dp)) }
+        else {
+            item {
+                Text("Still owed to you · all dates", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val amount = money(data.outstanding)
+                val decimal = amount.lastIndexOf('.')
+                Text(buildAnnotatedString {
+                    withStyle(SpanStyle(fontSize = 28.sp, fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(amount.take(1)) }
+                    append(amount.substring(1, decimal))
+                    withStyle(SpanStyle(fontSize = 20.sp, fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(amount.substring(decimal)) }
+                }, Modifier.padding(top = 7.dp, bottom = 7.dp),
+                    style = MaterialTheme.typography.headlineLarge.copy(fontSize = 39.sp, lineHeight = 46.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"))
+                val allDateBalances = RepaymentAccounting.people(data.copy(shares = if (peopleView) data.shares else emptyList()))
+                Text("${owedBalanceCountLabel(allDateBalances)} · every repayment accounted for",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(22.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                val monthName = month.format(DateTimeFormatter.ofPattern("MMMM"))
+                Row(Modifier.fillMaxWidth().padding(vertical = 17.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    RepaymentMetric("Newly owed · $monthName", data.newlyOwed, Modifier.weight(1f))
+                    RepaymentMetric("Received back · $monthName", data.received, Modifier.weight(1f))
                 }
-                val groups = expenses.groupBy(::groupKey).toSortedMap()
-                val periodExpenses = data.expenses.filter { !monthOnly || Instant.ofEpochMilli(it.effectiveTimestamp).atZone(ZoneId.systemDefault()).toLocalDate().withDayOfMonth(1) == month.withDayOfMonth(1) }
-                val periodIds = periodExpenses.map { it.id }.toSet()
-                val personShares = data.shares.filter { it.expenseId in periodIds && (GroupSplitAccounting.owed(it, data.repayments) == 0L) == settled }
-                val byPerson = personShares.groupBy { it.memberId }
-                LazyColumn(Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (group == null && personId == null) {
-                        item {
-                            Text(money(data.outstanding), style = MaterialTheme.typography.headlineLarge)
-                            Text("Still owed · all dates", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        item {
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text(monthName, style = MaterialTheme.typography.titleMedium)
-                                    RepaymentMetric("Still unpaid from this month's payments", data.monthOutstanding)
-                                    TextButton(onClick = { monthDetails = !monthDetails }) { Text(if (monthDetails) "Hide month breakdown" else "Month breakdown") }
-                                    if (monthDetails) {
-                                        RepaymentMetric("Newly owed from this month's payments", data.newlyOwed)
-                                        RepaymentMetric("Received back during this month", data.received)
-                                        Text("Receipts this month may settle older expenses. Undated legacy repayments are not counted as monthly receipts.",
-                                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-                        }
-                        item {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterChip(selected = !settled, onClick = { settled = false }, label = { Text("Outstanding") })
-                                FilterChip(selected = settled, onClick = { settled = true }, label = { Text("Settled") })
-                            }
-                            Row(Modifier.fillMaxWidth().clickable { monthOnly = !monthOnly }, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                Checkbox(checked = monthOnly, onCheckedChange = { monthOnly = it })
-                                Text("Only payments made in $monthName", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                            }
-                            Text("Names are local labels only; no contacts are accessed or invited.", style = MaterialTheme.typography.bodySmall)
-                            if (data.shares.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterChip(peopleView, { peopleView = true }, label = { Text("By person") })
-                                FilterChip(!peopleView, { peopleView = false }, label = { Text("By group") })
-                            }
-                        }
-                        if (peopleView) items(byPerson.keys.sortedBy { id -> data.members.firstOrNull { it.id == id }?.name }, key = { "person:$it" }) { id ->
-                            val name = data.members.firstOrNull { it.id == id }?.name ?: "Local person"
-                            val owed = byPerson.getValue(id).fold(BigInteger.ZERO) { n, share -> n + BigInteger.valueOf(GroupSplitAccounting.owed(share, data.repayments)) }
-                            Column(Modifier.fillMaxWidth().clickable { personId = id }.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text(name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                                    Text(if (owed.signum() == 0) "Settled" else "Owes ${money(owed)}", style = MaterialTheme.typography.titleMedium)
-                                }
-                                val count = byPerson.getValue(id).size
-                                Text("$count shared expense${if (count == 1) "" else "s"} · View balances & repayments", style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-                            }
-                        }
-                        if (groups.isEmpty() && (!peopleView || byPerson.isEmpty())) item { Text(if (settled) "No settled expenses in this view." else "Nothing outstanding in this view.") }
-                        val visibleGroups = if (!peopleView) groups else groups.mapValues { (_, rows) -> rows.filter { row -> data.shares.none { it.expenseId == row.id } } }.filterValues { it.isNotEmpty() }
-                        if (peopleView && visibleGroups.isNotEmpty() && data.shares.isNotEmpty()) item { Text("Unassigned to people", style = MaterialTheme.typography.titleMedium) }
-                        items(visibleGroups.keys.toList(), key = { it }) { key ->
-                            val records = visibleGroups.getValue(key)
-                            Column(Modifier.fillMaxWidth().clickable { group = key }.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(records.first().groupLabel?.takeIf { it.isNotBlank() } ?: "Unlabelled", style = MaterialTheme.typography.titleMedium)
-                                Text("${records.size} expense${if (records.size == 1) "" else "s"} · ${friendly(records.first().ownership)}",
-                                    style = MaterialTheme.typography.bodySmall)
-                                Text(money(records.fold(BigInteger.ZERO) { n, row -> n + BigInteger.valueOf(RepaymentAccounting.owed(row)) }),
-                                    style = MaterialTheme.typography.titleMedium)
-                                HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-                            }
-                        }
-                    } else if (personId != null) {
-                        val name = data.members.firstOrNull { it.id == personId }?.name ?: "Local person"
-                        val shares = byPerson[personId].orEmpty()
-                        item {
-                            Text(name, style = MaterialTheme.typography.titleLarge)
-                            Text(if (monthOnly) "Shares from $monthName payments" else "Shares across all dates", style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (shares.isEmpty()) item { Text("Nothing remains in this view. Repayment history is kept in each expense.") }
-                        items(shares, key = { it.id }) { share ->
-                            val row = data.expenses.first { it.id == share.expenseId }
-                            val owed = GroupSplitAccounting.owed(share, data.repayments)
-                            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(row.counterpartyLabel ?: "Expense", style = MaterialTheme.typography.titleMedium)
-                                Text("${row.groupLabel.orEmpty()} · ${transactionTime(row.effectiveTimestamp)}", style = MaterialTheme.typography.bodySmall)
-                                Text("Share ${money(share.amountMinor)} · Still owed ${money(owed)}", style = MaterialTheme.typography.bodyMedium)
-                                if (owed > 0) Button(onClick = { recordingId = row.id; recordingMemberId = share.memberId }) { Text("Record money received") }
-                                TextButton(onClick = { onExpense(row.id) }) { Text("Expense & repayment history") }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-                            }
-                        }
-                    } else {
-                        val records = groups[group].orEmpty()
-                        item {
-                            Text(records.firstOrNull()?.groupLabel ?: "Expenses", style = MaterialTheme.typography.titleLarge)
-                            Text(if (monthOnly) "Payments made in $monthName" else "Expenses across all dates", style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (records.isEmpty()) item { Text("No expenses remain in this view.") }
-                        items(records, key = { it.id }) { row ->
-                            Column(Modifier.fillMaxWidth().clickable { onExpense(row.id) }.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(row.counterpartyLabel ?: "Expense", style = MaterialTheme.typography.titleMedium)
-                                Text("Still owed ${money(RepaymentAccounting.owed(row))}")
-                                Text("Paid ${money(row.amountMinor)} · Your share ${money(RepaymentAccounting.personal(row))}", style = MaterialTheme.typography.bodySmall)
-                                Text(transactionTime(row.effectiveTimestamp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (RepaymentAccounting.owed(row) > 0) Button(onClick = { recordingId = row.id; recordingMemberId = null }) { Text("Record money received") }
-                                HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
-                            }
+                TextButton(onClick = { monthDetails = !monthDetails }, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (monthDetails) "Hide month breakdown" else "Month breakdown")
+                }
+                if (monthDetails) {
+                    RepaymentMetric("Still unpaid from this month's payments", data.monthOutstanding)
+                    Text("Receipts may settle older expenses. Undated legacy repayments stay outside monthly receipts.",
+                        Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LedgerChoiceChip(peopleView, { peopleView = true; personId = null }, label = { Text("By person") }, shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
+                        LedgerChoiceChip(!peopleView, { peopleView = false; personId = null }, label = { Text("By group") }, shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
+                    }
+                    Row(Modifier.fillMaxWidth().clickable { monthOnly = !monthOnly; personId = null }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(monthOnly, { monthOnly = it; personId = null })
+                        Text("Only payments made in ${month.format(DateTimeFormatter.ofPattern("MMMM uuuu"))}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (monthOnly || !peopleView) Text("${if (peopleView) "By person" else "By group"}${if (monthOnly) " · expenses from $monthName" else " · all dates"}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LedgerChoiceChip(!settled, { settled = false }, label = { Text("Outstanding") }, shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
+                    LedgerChoiceChip(settled, { settled = true }, label = { Text("Settled") }, shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
+                }
+                feedback?.let { Text(it, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyMedium) }
+            }
+            items(visible, key = { it.id }) { person ->
+                Row(Modifier.fillMaxWidth().clickable { personId = person.id }.padding(vertical = 17.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    PersonInitial(person.name)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(person.name, style = MaterialTheme.typography.titleSmall)
+                        val size = person.expenses.size
+                        Text("$size shared expense${if (size == 1) "" else "s"}${if (person.received.signum() > 0) " · ${compactMoney(person.received)} received" else ""}",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(if (person.outstanding.signum() == 0) "Settled" else compactMoney(person.outstanding),
+                        Modifier.widthIn(max = 150.dp), style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp, fontFeatureSettings = "tnum"))
+                    LedgerIcon("chevron", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            if (visible.isEmpty()) item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("No balances here", style = MaterialTheme.typography.titleLarge)
+                    Text(if (settled) "People move to Settled once their recorded share is repaid."
+                        else "Nothing is outstanding. Recorded repayments remain in Settled.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            item { Text("Names stay on your phone. Nobody is contacted or invited.", Modifier.padding(top = 20.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
+    val person = people.firstOrNull { it.id == personId }
+    if (person != null && recordingId == null) PersonBalanceSheet(person,
+        onDismiss = { personId = null }, onOpenTransaction = onOpenTransaction,
+        onRecord = { entry -> recordingId = entry.expense.id; recordingMemberId = entry.memberId })
+    data?.expenses?.firstOrNull { it.id == recordingId }?.let { expense ->
+        RepaymentEditor(repository, expense, null, onDismiss = { recordingId = null; recordingMemberId = null },
+            initialMemberId = recordingMemberId, onSaved = {
+                feedback = "Repayment recorded. Your spending is unchanged."; onChanged()
+            })
+    }
+}
+
+@Composable
+private fun PersonInitial(name: String, modifier: Modifier = Modifier) {
+    val dark = MaterialTheme.colorScheme.background.red < .5f
+    Surface(modifier.size(44.dp), shape = CircleShape, color = if (dark) Color(0xFF332E43) else Color(0xFFECE6F7),
+        contentColor = MaterialTheme.colorScheme.onSurface) {
+        Box(contentAlignment = Alignment.Center) { Text(name.take(1).uppercase(), style = MaterialTheme.typography.titleSmall) }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PersonBalanceSheet(person: PersonRepaymentBalance, onDismiss: () -> Unit,
+    onOpenTransaction: (String) -> Unit, onRecord: (PersonExpenseBalance) -> Unit) {
+    val unpaid = person.expenses.filter { it.outstandingMinor > 0 }
+    var selectedExpense by rememberSaveable(person.id) { mutableStateOf(unpaid.singleOrNull()?.expense?.id) }
+    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = null,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.9f)) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${person.name}’s balance", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+            LazyColumn(Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        PersonInitial(person.name)
+                        Column {
+                            Text(money(person.outstanding), style = MaterialTheme.typography.titleLarge)
+                            Text(if (person.outstanding.signum() == 0) "All settled" else "Still owed to you",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
-                data.expenses.firstOrNull { it.id == recordingId }?.let { expense ->
-                    RepaymentEditor(repository, expense, null, onDismiss = { recordingId = null; recordingMemberId = null }, initialMemberId = recordingMemberId)
+                items(person.expenses, key = { it.expense.id }) { entry ->
+                    Surface(color = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(15.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp)) {
+                            RepaymentMathRow(entry.expense.counterpartyLabel ?: "Expense", money(entry.expense.amountMinor))
+                            Text("${transactionTime(entry.expense.effectiveTimestamp)} · you paid", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            RepaymentMathRow("${person.name}’s share", money(entry.shareMinor))
+                            RepaymentMathRow("Received", money(entry.shareMinor - entry.outstandingMinor))
+                            RepaymentMathRow("Still unpaid", money(entry.outstandingMinor))
+                            TextButton(onClick = { onDismiss(); onOpenTransaction(entry.expense.id) }) { Text("Expense & repayment history") }
+                            if (unpaid.size > 1 && entry.outstandingMinor > 0) LedgerChoiceChip(selectedExpense == entry.expense.id,
+                                { selectedExpense = entry.expense.id }, label = { Text("Repay this expense") })
+                        }
+                    }
                 }
+                item {
+                    RepaymentMathRow("Received so far", money(person.received))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    RepaymentMathRow("Still owed", money(person.outstanding))
+                    Text("Recording a repayment updates this balance. It does not change your spending.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (unpaid.size > 1) Text("Choose the expense this repayment settles. Any remaining receipt can be linked to another expense.",
+                        Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Button(onClick = {
+                if (unpaid.isEmpty()) onDismiss() else unpaid.firstOrNull { it.expense.id == selectedExpense }?.let(onRecord)
+            }, enabled = unpaid.isEmpty() || unpaid.any { it.expense.id == selectedExpense }, shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp).heightIn(min = 50.dp)) {
+                Text(if (unpaid.isEmpty()) "Done" else "Record repayment")
             }
         }
     }
 }
 
-@Composable private fun RepaymentMetric(label: String, amount: BigInteger) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.bodySmall)
-        Text(money(amount), style = MaterialTheme.typography.titleMedium)
+@Composable
+private fun RepaymentMetric(label: String, amount: BigInteger, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(compactMoney(amount), style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp, fontFeatureSettings = "tnum"))
+    }
+}
+
+@Composable
+private fun RepaymentMathRow(label: String, amount: String) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(amount, Modifier.widthIn(max = 160.dp), style = MaterialTheme.typography.titleSmall)
     }
 }

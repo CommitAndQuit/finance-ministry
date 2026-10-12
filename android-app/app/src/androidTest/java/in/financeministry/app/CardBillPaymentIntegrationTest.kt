@@ -37,9 +37,9 @@ class CardBillPaymentIntegrationTest {
             }
             assertNotNull("Card bill notification was not published within five seconds", published)
             val notification = published!!.notification
-            assertEquals("Card bill payment recorded", notification.extras.getString(Notification.EXTRA_TITLE))
+            assertEquals("Card confirmation recorded", notification.extras.getString(Notification.EXTRA_TITLE))
             val text = notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
-            assertTrue(text.contains("Card bill payment")); assertFalse(text.contains("Money in"))
+            assertTrue(text.contains("Card confirmation")); assertFalse(text.contains("Money in"))
             assertFalse(notification.publicVersion.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains("1000"))
         } finally { manager.cancel(item.id, 1) }
     }

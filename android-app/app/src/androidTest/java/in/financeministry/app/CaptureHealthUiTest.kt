@@ -17,8 +17,8 @@ class CaptureHealthUiTest {
         try {
             prefs.edit().putBoolean("notifications", false).putBoolean("capture_error", true)
                 .putLong("last_capture_at", 1_790_070_000_000L).commit()
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("SMS & notifications").performScrollTo().performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("SMS & notifications")
             rule.onNodeWithText("Capture health").performScrollTo().performClick()
             rule.onNodeWithText("Off in app").assertExists()
             rule.onNodeWithText("Last recorded SMS").assertExists()
@@ -26,7 +26,7 @@ class CaptureHealthUiTest {
             rule.onNodeWithText("A recording error was detected").assertExists()
             rule.onNodeWithText("Notifications do not control SMS capture.").assertExists()
             rule.onNodeWithText("Add missing transaction").performScrollTo().performClick()
-            rule.onNodeWithText("Amount (INR)").assertExists()
+            rule.onNode(editableLedgerField("Amount (INR)")).assertExists()
         } finally {
             prefs.edit().putBoolean("notifications", oldNotifications).putBoolean("capture_error", oldError)
                 .putLong("last_capture_at", oldLast).commit()

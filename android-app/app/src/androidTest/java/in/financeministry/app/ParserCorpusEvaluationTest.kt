@@ -22,11 +22,13 @@ class ParserCorpusEvaluationTest {
         val output = JSONArray()
         for (i in 0 until cases.length()) {
             val item = cases.getJSONObject(i)
-            val result = parser.parse(IncomingSms("SANITIZED-EVALUATION", 1788600000000L, item.getString("body")))
+            val result = parser.parse(IncomingSms(item.optString("sender", "SANITIZED-EVALUATION"), 1788600000000L, item.getString("body")))
             output.put(JSONObject().put("id", item.getString("id"))
                 .put("decision", result.decision.name).put("rule", result.ruleId)
                 .put("amountMinor", result.amountMinor ?: JSONObject.NULL)
-                .put("direction", result.direction.name).put("status", result.status.name))
+                .put("direction", result.direction.name).put("status", result.status.name)
+                .put("transactionType", result.transactionType.name)
+                .put("channel", result.channel.name).put("currency", result.currency))
         }
         File(instrumentation.targetContext.filesDir, "parser-evaluation-output.json").writeText(output.toString())
         instrumentation.sendStatus(0, android.os.Bundle().apply { putInt("evaluatedCases", cases.length()) })

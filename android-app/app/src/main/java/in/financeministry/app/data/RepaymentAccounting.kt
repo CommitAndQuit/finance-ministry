@@ -1,6 +1,18 @@
 package `in`.financeministry.app.data
 
 import java.math.BigInteger
+import java.util.Locale
+
+data class PersonExpenseBalance(val expense: TransactionEntity, val memberId: String?,
+    val shareMinor: Long, val outstandingMinor: Long)
+
+data class PersonRepaymentBalance(val id: String, val name: String, val expenses: List<PersonExpenseBalance>) {
+    val outstanding: BigInteger get() = expenses.fold(BigInteger.ZERO) { n, item -> n + BigInteger.valueOf(item.outstandingMinor) }
+    val received: BigInteger get() = expenses.fold(BigInteger.ZERO) { n, item -> n + BigInteger.valueOf(item.shareMinor - item.outstandingMinor) }
+}
+
+data class RepaymentCreditMatch(val row: TransactionEntity, val availableMinor: Long,
+    val score: Int, val reasons: List<String>)
 
 data class RepaymentSummary(
     val outstanding: BigInteger, val newlyOwed: BigInteger,
@@ -10,10 +22,53 @@ data class RepaymentSummary(
 )
 
 object RepaymentAccounting {
+    /** Keep a person's entire history together, including settled expenses and unnamed legacy balances. */
+    fun people(summary: RepaymentSummary): List<PersonRepaymentBalance> {
+        val entries = summary.expenses.flatMap { expense ->
+            val shares = summary.shares.filter { it.expenseId == expense.id }
+            if (shares.isEmpty()) {
+                val name = expense.groupLabel.orEmpty().trim().ifBlank { "Unassigned" }
+                listOf(Triple("legacy:${expense.ownership}:${name.lowercase(Locale.ROOT)}", name,
+                    PersonExpenseBalance(expense, null, principal(expense), owed(expense))))
+            } else shares.map { share ->
+                Triple("person:${share.memberId}", summary.members.firstOrNull { it.id == share.memberId }?.name ?: "Local person",
+                    PersonExpenseBalance(expense, share.memberId, share.amountMinor, GroupSplitAccounting.owed(share, summary.repayments)))
+            }
+        }
+        return entries.groupBy { it.first }.map { (id, rows) ->
+            PersonRepaymentBalance(id, rows.first().second, rows.map { it.third }.sortedByDescending { it.expense.effectiveTimestamp })
+        }.sortedWith(compareBy<PersonRepaymentBalance> { it.name.lowercase(Locale.ROOT) }.thenBy { it.id })
+    }
+
+    /** Suggestions are evidence, never allocations. Only recordRepayment can change a balance. */
+    fun rankCredits(expense: TransactionEntity, payer: String, unpaidMinor: Long,
+        credits: List<Pair<TransactionEntity, Long>>): List<RepaymentCreditMatch> {
+        val nameTokens = payer.lowercase(Locale.ROOT).split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter { it.length >= 2 }.toSet()
+        return credits.filter { (row, available) -> available > 0 && available <= (row.amountMinor ?: 0) &&
+            eligible(row) && row.direction == "Credit" && row.transactionType !in setOf("Refund", "Reversal") }
+            .map { (row, available) ->
+                val reasons = mutableListOf<String>()
+                var score = 0
+                val labelTokens = row.counterpartyLabel.orEmpty().lowercase(Locale.ROOT).split(Regex("[^\\p{L}\\p{N}]+")) .toSet()
+                if (nameTokens.isNotEmpty() && labelTokens.containsAll(nameTokens)) {
+                    reasons += "Name matches ${payer.trim()}"; score += 60
+                }
+                if (unpaidMinor > 0 && available == unpaidMinor) { reasons += "Exact unpaid amount"; score += 30 }
+                else if (unpaidMinor > 0 && available < unpaidMinor) { reasons += "Amount fits within unpaid balance"; score += 10 }
+                val elapsed = BigInteger.valueOf(row.effectiveTimestamp) - BigInteger.valueOf(expense.effectiveTimestamp)
+                if (elapsed.signum() >= 0 && elapsed <= BigInteger.valueOf(30L * 86_400_000)) {
+                    reasons += "Received within 30 days of this expense"; score += 15
+                }
+                RepaymentCreditMatch(row, available, score, reasons)
+            }.sortedWith(compareByDescending<RepaymentCreditMatch> { it.score }
+                .thenByDescending { it.row.effectiveTimestamp }.thenBy { it.row.id })
+    }
+
     fun eligible(row: TransactionEntity, reversed: Set<String> = emptySet()): Boolean =
         row.id !in reversed && row.duplicateOfId == null && row.currency == "INR" &&
             row.amountMinor != null && row.amountMinor > 0 && row.status == "Successful" &&
-            row.reviewState != "NeedsReview" && row.transactionType !in setOf("SelfTransfer", "CardRepayment") && row.ownership != "SelfTransfer"
+            row.reviewState in setOf("AutoRecorded", "Confirmed") && row.transactionType !in setOf("SelfTransfer", "CardRepayment") && row.ownership != "SelfTransfer"
 
     fun personal(row: TransactionEntity): Long = if (!row.repaymentExpected || row.ownership !in setOf("ForOther", "Group"))
         row.amountMinor ?: 0 else row.personalShareMinor ?: row.amountMinor ?: 0

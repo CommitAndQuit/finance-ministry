@@ -9,6 +9,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import `in`.financeministry.app.ui.LedgerTextInput
 import `in`.financeministry.app.core.model.*
 import `in`.financeministry.app.data.*
 import java.math.BigDecimal
@@ -50,12 +51,13 @@ internal class GroupSplitFormDraft(ready: Boolean) {
 }
 
 @Composable internal fun GroupSplitFormFields(repository: TransactionRepository, draft: GroupSplitFormDraft, amount: String,
-    personalShare: String, enabled: Boolean, onPersonalShare: (String) -> Unit, onError: (String) -> Unit) {
+    personalShare: String, enabled: Boolean, onPersonalShare: (String) -> Unit, onError: (String) -> Unit,
+    onPresetApplied: (String) -> Unit = {}) {
     if (draft.hasPeople) {
         Text("Your share: ₹$personalShare", style = MaterialTheme.typography.titleMedium)
         Text("${draft.shares!!.size} individual shares · Edit the split to change amounts.", style = MaterialTheme.typography.bodySmall)
         Text("The split is recorded when you save this transaction.", style = MaterialTheme.typography.bodySmall)
-    } else OutlinedTextField(personalShare, onPersonalShare, label = { Text("Your share (INR)") },
+    } else LedgerTextInput(personalShare, onPersonalShare, label = "Your share (INR)", amountStyle = true,
         supportingText = { Text("The rest is tracked as money others owe you.") }, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
     TextButton(onClick = {
@@ -66,6 +68,6 @@ internal class GroupSplitFormDraft(ready: Boolean) {
         val own = try { BigDecimal(personalShare).movePointRight(2).longValueExact() } catch (_: Exception) { 0L }
         GroupSplitEditor(repository, total, own, draft.shares.orEmpty(),
             onApply = { personal, shares -> onPersonalShare(shareDecimal(personal)); draft.encoded = encodeShares(shares) },
-            onDismiss = { draft.total = null })
+            onDismiss = { draft.total = null }, onPresetApplied = onPresetApplied)
     }
 }

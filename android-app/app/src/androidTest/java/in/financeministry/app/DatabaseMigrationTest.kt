@@ -11,6 +11,25 @@ class DatabaseMigrationTest {
     @get:Rule val helper = MigrationTestHelper(
         InstrumentationRegistry.getInstrumentation(), FinanceDatabase::class.java)
 
+    @Test fun schema_eight_upgrade_adds_empty_presets_without_changing_individual_shares() {
+        helper.createDatabase("migration-8-9", 8).apply {
+            execSQL("INSERT INTO transactions (id, sourceType, sourceTimestamp, effectiveTimestamp, amountMinor, currency, direction, status, channel, transactionType, confidence, reviewState, parserVersion, isUserCorrected, createdAt, updatedAt, category, ownership, personalShareMinor, repaidMinor, repaymentExpected, categoryNeedsReview) VALUES ('dinner', 'Manual', 10, 10, 90000, 'INR', 'Debit', 'Successful', 'CashManual', 'Other', 0, 'Confirmed', 0, 1, 10, 10, 'Food', 'Group', 30000, 0, 1, 0)")
+            execSQL("INSERT INTO local_members VALUES ('alice', 'Alice', 10)")
+            execSQL("INSERT INTO group_shares VALUES ('share', 'dinner', 'alice', 60000)")
+            close()
+        }
+        helper.runMigrationsAndValidate("migration-8-9", 9, true, FinanceDatabase.MIGRATION_8_9).use { db ->
+            db.query("SELECT personalShareMinor, repaidMinor FROM transactions WHERE id='dinner'").use {
+                assertTrue(it.moveToFirst()); assertEquals(30000L, it.getLong(0)); assertEquals(0L, it.getLong(1))
+            }
+            db.query("SELECT memberId, amountMinor FROM group_shares WHERE id='share'").use {
+                assertTrue(it.moveToFirst()); assertEquals("alice", it.getString(0)); assertEquals(60000L, it.getLong(1))
+            }
+            db.query("SELECT COUNT(*) FROM group_presets").use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
+            db.query("SELECT COUNT(*) FROM group_preset_members").use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
+        }
+    }
+
     @Test fun schema_seven_upgrade_keeps_legacy_balances_unassigned() {
         helper.createDatabase("migration-7-8", 7).apply {
             execSQL("INSERT INTO transactions (id, sourceType, sourceTimestamp, effectiveTimestamp, amountMinor, currency, direction, status, channel, transactionType, confidence, reviewState, parserVersion, isUserCorrected, createdAt, updatedAt, category, ownership, groupLabel, personalShareMinor, repaidMinor, repaymentExpected, categoryNeedsReview) VALUES ('dinner', 'Manual', 10, 10, 90000, 'INR', 'Debit', 'Successful', 'CashManual', 'Other', 0, 'Confirmed', 0, 1, 10, 10, 'Food', 'Group', 'Friends', 30000, 10000, 1, 0)")
