@@ -1,7 +1,9 @@
 package `in`.financeministry.app
 
 import android.app.Application
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
@@ -55,6 +57,31 @@ class PublicSettingsUiTest {
         return shot
     }
     private fun cleanup(r: TransactionRepository) = runBlocking { r.eraseAll(); r.close() }
+
+    private fun systemClockBounds(): Rect {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val info = automation.serviceInfo
+        val originalFlags = info.flags
+        var bounds: Rect? = null
+        try {
+            info.flags = originalFlags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            automation.serviceInfo = info
+            rule.waitUntil(5000) {
+                bounds = automation.windows.asSequence().flatMap { window ->
+                    window.root?.findAccessibilityNodeInfosByViewId("com.android.systemui:id/clock")
+                        .orEmpty().asSequence()
+                }.filter { it.isVisibleToUser }.map { node ->
+                    Rect().also(node::getBoundsInScreen)
+                }.firstOrNull { !it.isEmpty }
+                bounds != null
+            }
+            return requireNotNull(bounds)
+        } finally {
+            info.flags = originalFlags
+            automation.serviceInfo = info
+        }
+    }
 
     @Test fun close_and_subpage_back_keep_the_activity_query_and_financial_records() {
         val r=repository()
@@ -114,12 +141,16 @@ class PublicSettingsUiTest {
                 rule.onNodeWithText(choice).performClick()
                 assertEquals(choice,r.preferences.getString("appearance",null))
                 rule.onNodeWithContentDescription("Back to settings").performClick()
+                val clockBounds=systemClockBounds()
                 val sheetShot=screenshot("settings-${choice.lowercase()}")
                 try {
                     // Inspect the system clock while the sheet owns a separate
                     // window. Checking only Activity.window misses this contrast bug.
-                    val clockColors=(sheetShot.height*18/1000..sheetShot.height*40/1000).flatMap { y ->
-                        (sheetShot.width*4/100..sheetShot.width*14/100).map { x -> android.graphics.Color.red(sheetShot.getPixel(x,y)) }
+                    // Status-bar height and clock position differ with device cutouts.
+                    // Sample the actual clock, never a guessed rectangle below it.
+                    assertTrue("System clock is outside the screenshot", clockBounds.intersect(0,0,sheetShot.width,sheetShot.height))
+                    val clockColors=(clockBounds.top until clockBounds.bottom).flatMap { y ->
+                        (clockBounds.left until clockBounds.right).map { x -> android.graphics.Color.red(sheetShot.getPixel(x,y)) }
                     }
                     if(choice=="Dark") assertTrue("Dark sheet clock is unreadable: brightest pixel ${clockColors.max()}",clockColors.max()>=180)
                     else assertTrue("Light sheet clock is unreadable: darkest pixel ${clockColors.min()}",clockColors.min()<=80)

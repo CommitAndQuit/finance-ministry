@@ -60,7 +60,7 @@ class ManualEntryUiTest {
 
     @Test fun manual_form_keeps_date_source_and_notes_in_more_details() {
         rule.onNodeWithContentDescription("Add transaction").performClick()
-        rule.onNodeWithText("More details").assertIsDisplayed()
+        rule.onNodeWithText("More details").performScrollTo().assertIsDisplayed()
         rule.onAllNodes(hasText("Date:", substring = true)).assertCountEquals(0)
     }
 }

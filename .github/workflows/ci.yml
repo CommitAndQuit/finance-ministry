@@ -87,7 +87,14 @@ jobs:
           "$ANDROID_HOME/emulator/emulator" -list-avds | grep -Fx finance-ci
           "$ANDROID_HOME/emulator/emulator" -avd finance-ci -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -memory 2048 -cores 2 -port 5554 > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
-          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          cleanup() {
+            # Preserve synthetic UI evidence before stopping the emulator, including
+            # when a contrast assertion fails. Never use a personal-device ledger.
+            mkdir -p "$RUNNER_TEMP/ui-captures"
+            adb -s emulator-5554 pull /sdcard/Android/data/in.financeministry.app/files/settings-ux "$RUNNER_TEMP/ui-captures/" || true
+            kill "$emulator_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           export ANDROID_SERIAL=emulator-5554
           booted=false
           for attempt in $(seq 1 150); do
@@ -119,5 +126,6 @@ jobs:
             android-app/app/build/reports/androidTests/
             android-app/app/build/outputs/androidTest-results/
             ${{ runner.temp }}/emulator.log
+            ${{ runner.temp }}/ui-captures/
           retention-days: 14
           if-no-files-found: ignore

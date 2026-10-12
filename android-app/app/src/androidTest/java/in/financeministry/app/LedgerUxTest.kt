@@ -33,9 +33,8 @@ class LedgerUxTest {
         }
         rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed().performClick()
         rule.onNode(editableLedgerField("Amount (INR)")).assertIsDisplayed()
-        rule.onNodeWithText("More details").assertIsDisplayed()
         rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
-        rule.onNodeWithText("More details").performClick()
+        rule.onNodeWithText("More details").performScrollTo().assertIsDisplayed().performClick()
         rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
         rule.onNodeWithContentDescription("Close transaction editor").performClick()
     }
