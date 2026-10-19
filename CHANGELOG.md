@@ -2,6 +2,42 @@
 
 User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
+## Unreleased
+
+## 0.1.0-alpha.22
+
+- Split group expenses by parts (including fractional or zero parts), with exact
+  paise allocation, per-person previews and reusable ratio defaults. Keep equal
+  and custom-amount splits and the existing individual repayment safeguards.
+- Make the existing optional transaction notes easier to find as Description in
+  the main payment editor; existing descriptions remain searchable and encrypted.
+- Add Help & feedback in Settings with bug-report and feature-request email
+  drafts addressed to financeministrysupport@gmail.com, plus copy-address fallback.
+  Only the app version and a blank report template are included automatically.
+
+- Recognize ICICI UPI debit alerts whose recipient name contains digits, so a
+  single outgoing payment is recorded instead of sent to Review for conflicting
+  debit/credit wording. Preserve checks for ambiguous and negated movements
+  (parser revision 12).
+
+- Replace the generic green launcher badge with an ink-blue FM monogram, adaptive
+  launcher shapes and Android themed-icon support. Notification glyphs stay separate.
+
+- Detect Federal Bank One Credit Card merchant refunds phrased as already
+  received, even when a following sentence says they will be adjusted against
+  outstanding dues. Preserve the merchant and INR amount; unmatched refunds
+  remain in Review rather than being silently linked to a purchase. Future,
+  negated and pending receipts retain conservative handling (parser revision 11).
+
+- Verified the feature changes with 183 JVM tests and 34 focused Android 16
+  emulator checks covering split calculations, saved defaults, settlements,
+  descriptions, support drafts and editor usability. Local lint reported zero
+  errors and 61 warnings. Release CI runs the wider instrumentation/SMS gates.
+  No database schema change from alpha.21. Back up important ledgers before
+  updating; existing transactions are not silently reparsed. This remains a
+  debug alpha, not a Play Store production release; physical/OEM validation is
+  not claimed.
+
 ## 0.1.0-alpha.21
 
 - Refresh the native app around Home, Activity, People and Review with warm light

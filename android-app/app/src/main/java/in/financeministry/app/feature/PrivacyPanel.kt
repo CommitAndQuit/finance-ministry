@@ -16,7 +16,7 @@ fun PrivacyPanel(onErase: () -> Unit, busy: Boolean) {
         catch (_: Exception) { error = "No browser available. Support: github.com/hk121902-stack/finance-ministry" }
     }
     Text("Privacy and support", style = MaterialTheme.typography.titleMedium)
-    Text("Finance Ministry is an independent open-source app, not a government service or bank. Maintained by hk121902-stack. Policy updated 3 October 2026.")
+    Text("Finance Ministry is an independent app, not a government service or bank. Maintained by hk121902-stack. Policy updated 19 October 2026.")
     Text("Local processing", style = MaterialTheme.typography.titleSmall)
     Text("No sign-up, app backend, advertising or analytics. The app has no Internet permission and cannot initiate payments. Optional SMS permissions are requested only after disclosure. Android delivers incoming messages broadly; filtering happens on your device. OTPs and non-transaction messages are rejected, but parsing can be wrong. Review and correct your ledger.")
     Text("Optional permissions", style = MaterialTheme.typography.titleSmall)
@@ -28,8 +28,7 @@ fun PrivacyPanel(onErase: () -> Unit, busy: Boolean) {
     Text("Export, recovery and deletion", style = MaterialTheme.typography.titleSmall)
     Text("Encrypted backups go to the location you choose in Android's file picker. Their password is not uploaded and cannot be recovered. CSV reports are unencrypted and are not restore backups. The chosen file provider may sync files under its own policies. Restore replaces the ledger only after validation and confirmation, and pauses capture and reminders. Deleting a transaction removes its correction history. Erase all deletes local data, keys and settings and pauses capture. Uninstall also deletes your ledger; exported files are not deleted by erasure or uninstall.")
     Text("Support and third parties", style = MaterialTheme.typography.titleSmall)
-    Text("GitHub handles repository visits, downloads and reports under its own policies. Share synthetic samples only—never real SMS or account details. Report vulnerabilities privately through GitHub security advisories, not public issues. If private reporting is unavailable, open a minimal issue requesting a private channel, without exploit details. This solo-maintained alpha has no guaranteed support response time.")
-    TextButton(onClick = { open("https://github.com/hk121902-stack/finance-ministry/issues") }) { Text("Help and bug reports") }
+    Text("Email support: $SUPPORT_EMAIL. Settings → Help & feedback opens a draft in your email app with a bug or feature template and app version only. Nothing is sent automatically. No ledger, SMS, logs or attachments are added. Your email provider processes what you choose to send under its own policies. GitHub handles repository visits and security reports under its own policies. Share synthetic samples only—never real SMS or account details. This solo-maintained app has no guaranteed support response time.")
     TextButton(onClick = { open("https://github.com/hk121902-stack/finance-ministry/security/advisories/new") }) { Text("Report a security issue privately") }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     TextButton(onClick = onErase, enabled = !busy) { Text("Erase all local data", color = MaterialTheme.colorScheme.error) }

@@ -17,6 +17,17 @@ internal object MovementTemplates {
     val deposited = Regex("""^update!\s*$money\s+deposited in hdfc bank a/c\s+[x*]+\d{4}\s+on\s+\d{2}-[a-z]{3}-\d{2,4}\s+for neft\s+cr-""")
     val postedRefund = Regex("""^alert!\s*$money\s+refunded by\s+.+\s+on\s+\d{2}/[a-z]{3}/\d{2,4}\s*& adjusted against hdfc bank credit card\s+\d{4}\b""")
     val completedCardRefund = Regex("""^$money\s+has been refunded to your\s+[^\r\n]{1,60}\bcard\s+[x*]+\d{4}\s+by\s+[^\r\n]+""")
+    // Receipt is already complete; the later adjustment of dues is not a future refund.
+    // Anchor the entire issuer layout instead of treating every "received" as a credit.
+    private val receivedCardRefundLayout = Regex(
+        """^refund of\s+$money\s+from\s+(?<merchant>[a-z0-9][a-z0-9 .&'/_()-]{0,79}?)\s+received on your\s+federal bank\s+one credit card\.\s*(?:this will be adjusted against your outstanding dues\.\s*)?(?:check details:\s*https://\S+)?$""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val refundQualifier = Regex("""\b(?:not|never|yet|been|be|may|will|pending)\b""", RegexOption.IGNORE_CASE)
+    fun receivedCardRefund(text: String): MatchResult? = receivedCardRefundLayout.find(text)?.takeUnless {
+        // Do not absorb "not [yet] received" or "may be received" into a merchant name.
+        refundQualifier.containsMatchIn(it.groups["merchant"]!!.value)
+    }
     val initiatedRefund = Regex("""^(?:dear customer,\s*)?refund of\s+$money\s+for your\s+.{1,100}\border\s*#?\w+\s+is initiated\.""")
 
     val repayment = Regex("""^(?:payment of $money has been received (?:on|towards) your (?:icici|axis) bank credit card [x*]+\d{4}\b|dear hdfcbank cardmember,\s*payment of $money received towards your credit card ending with \d{4}\b|hdfc bank cardmember, online payment of $money vide ref# [^\r\n]{1,80} was credited to your card ending \d{4}\b)""")
@@ -30,7 +41,7 @@ internal object MovementTemplates {
     fun receipt(text: String) = listOf(amazonReceipt, taxReceipt, airtelReceipt, merchantOrderReceipt, lpgReceipt).any { it.containsMatchIn(text) }
     fun secondaryConfirmation(text: String) = receipt(text) || autopay.containsMatchIn(text) || walletFunding.containsMatchIn(text)
     fun debit(text: String) = listOf(bobDebit, axisCard, hdfcCardUpi, pluxeeSpend, pluxeeFee, iciciCard, mandate, autopay).any { it.containsMatchIn(text) } || receipt(text)
-    fun credit(text: String) = listOf(received, deposited, postedRefund, completedCardRefund, initiatedRefund, repayment, walletFunding).any { it.containsMatchIn(text) }
+    fun credit(text: String) = listOf(received, deposited, postedRefund, completedCardRefund, initiatedRefund, repayment, walletFunding).any { it.containsMatchIn(text) } || receivedCardRefund(text) != null
     fun matches(text: String) = debit(text) || credit(text) || CardBillPaymentFormats.matches(text)
     fun card(text: String) = listOf(axisCard, hdfcCardUpi, iciciCard, autopay).any { it.containsMatchIn(text) }
 }

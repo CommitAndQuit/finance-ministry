@@ -127,6 +127,9 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         }
         if (direction == "Unknown") Text("Choose money out, money in, or transfer.", color = MaterialTheme.colorScheme.error)
         LedgerTextInput(label, { label = it.take(60); if (label.trim().length < 2) rememberCategory = false }, label = "Merchant or short label (optional)", singleLine = true, modifier = Modifier.fillMaxWidth())
+        LedgerTextInput(notes, { notes = it.take(200) }, label = "Description (optional)", enabled = !busy,
+            supportingText = { Text("${notes.length}/200 · A short note, such as dinner after the movie. Stored only on this device.", style = MaterialTheme.typography.bodySmall) },
+            modifier = Modifier.fillMaxWidth())
         }
         Choice("Category", category, availableCategories) { category = it }
         TextButton(onClick = { addingCategory = true }) { Text("Add category") }
@@ -239,7 +242,6 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
             }
             if (status != "Unknown") Choice("Payment status", status, TransactionStatus.entries.map { it.name }) { status = it }
             LedgerTextInput(hint, { hint = it }, label = "Account last 4 digits (optional)", singleLine = true, modifier = Modifier.fillMaxWidth())
-            LedgerTextInput(notes, { notes = it.take(200) }, label = "Notes (optional)", modifier = Modifier.fillMaxWidth())
             Text("Use short labels and notes. Do not paste SMS, OTPs, personal contact names, UPI IDs or full account numbers. Text stays encrypted on this device.", style = MaterialTheme.typography.bodySmall)
         }
         }

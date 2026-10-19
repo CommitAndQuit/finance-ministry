@@ -206,4 +206,20 @@ class PublicSettingsUiTest {
             assertEquals(4200L,runBlocking {r.snapshot().debit.toLong()})
         } finally {cleanup(r)}
     }
+
+    @Test fun help_and_feedback_is_available_from_main_settings() {
+        val r = repository()
+        try {
+            show(r)
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.onNodeWithText("Help & feedback").performScrollTo().performClick()
+            rule.onNodeWithText("Report a bug").assertIsDisplayed()
+            rule.onNodeWithText("Suggest a feature").assertIsDisplayed()
+            rule.onNodeWithText("financeministrysupport@gmail.com").assertExists()
+            screenshot("help-feedback").recycle()
+            rule.onNodeWithContentDescription("Back to settings").performClick()
+            rule.onNodeWithText("Appearance").assertExists()
+            assertEquals(4200L, runBlocking { r.snapshot().debit.toLong() })
+        } finally { cleanup(r) }
+    }
 }

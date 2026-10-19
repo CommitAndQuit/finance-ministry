@@ -87,16 +87,16 @@ class PublicEditorPresentationUiTest {
         assertEquals(row, runBlocking { r.get(row.id) })
     }
 
-    // A heading or Close inside the scrolling body must fail after reaching Notes.
+    // Heading, Close and Save must remain reachable at the last advanced field.
     @Test fun editor_heading_close_and_save_stay_reachable_when_advanced_fields_scroll() = withQuickEditor { r, row ->
         rule.onNodeWithText("More details").performScrollTo().performClick()
         rule.onNodeWithText("Advanced details").performScrollTo().performClick()
-        rule.onNode(editableLedgerField("Notes (optional)")).performScrollTo().assertIsDisplayed()
+        rule.onNode(editableLedgerField("Account last 4 digits (optional)")).performScrollTo().assertIsDisplayed()
         rule.onNodeWithText("Payment details").assertIsDisplayed()
         rule.onNodeWithContentDescription("Close transaction editor").assertIsDisplayed()
         rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
         capture("advanced-pinned-header")
-        rule.onNode(editableLedgerField("Notes (optional)")).performClick()
+        rule.onNode(editableLedgerField("Account last 4 digits (optional)")).performClick()
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         automation.serviceInfo = automation.serviceInfo.apply { flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
         rule.waitUntil(10000) { automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }

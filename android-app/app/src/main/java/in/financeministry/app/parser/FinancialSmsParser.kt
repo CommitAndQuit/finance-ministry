@@ -30,6 +30,7 @@ class RuleBasedFinancialSmsParser {
         val counterparty = if (ParserRules.sentPayment.containsMatchIn(ParserRules.normalized(input.body))) {
             Regex("""(?m)^To ([A-Za-z][A-Za-z .&'-]{0,59})\r?$""").find(input.body)?.groupValues?.get(1)?.trim()
         } else card?.groups?.get("merchant")?.value?.trim() ?: BankAlertFormats.counterparty(transactionText)
+            ?: MovementTemplates.receivedCardRefund(transactionText)?.groups?.get("merchant")?.value?.trim()
         return result.copy(maskedAccountHint = hints.singleOrNull(), counterpartyLabel = counterparty)
     }
 
@@ -231,6 +232,6 @@ class RuleBasedFinancialSmsParser {
         counterpartyLabel = null,
         confidence = confidence,
         ruleId = ruleId,
-        parserVersion = 10,
+        parserVersion = 12,
     )
 }

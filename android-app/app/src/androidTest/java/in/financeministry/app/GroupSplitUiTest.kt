@@ -101,6 +101,51 @@ class GroupSplitUiTest {
         } finally { runBlocking { r.eraseAll(); r.close() } }
     }
 
+    @Test fun parts_preview_survives_restoration_and_saved_default_keeps_exact_ratio() {
+        val r = repo(); val showing = mutableStateOf(true)
+        try {
+            val id = runBlocking { r.save(ManualInput("10.01", Direction.Debit, System.currentTimeMillis(),
+                TransactionType.Other, ownership = SpendingOwnership.Group, groupLabel = "Dinner", personalShare = "0")) }
+            val restore = StateRestorationTester(rule)
+            restore.setContent { FinanceMinistryTheme {
+                if (showing.value) GroupSplitEditor(r, 1001, 0, emptyList(),
+                    { own, shares -> r.saveGroupSplit(id, own, shares, r.get(id)!!.updatedAt) }, { showing.value = false })
+            } }
+            addPerson("Alice"); addPerson("Bob")
+            rule.onNodeWithText("By parts").performScrollTo().performClick()
+            rule.onNode(editableLedgerField("Parts for Alice")).performScrollTo().performTextReplacement("2")
+            rule.onNode(editableLedgerField("Parts for Bob")).performScrollTo().performTextReplacement("0")
+            androidx.test.espresso.Espresso.closeSoftKeyboard()
+            restore.emulateSavedInstanceStateRestore()
+            rule.waitUntil(15000) { rule.onAllNodes(editableLedgerField("Parts for Alice")).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("By parts").assertIsSelected()
+            rule.onNode(editableLedgerField("Parts for Alice")).performScrollTo().assertTextEquals("2")
+            rule.onNode(hasText("₹6.67") and !hasText("Owed back to you")).assertExists()
+            capture("parts-split.png")
+            rule.onNode(editableLedgerField("Parts for You")).performScrollTo().performTextReplacement("0")
+            rule.onNode(editableLedgerField("Parts for Alice")).performScrollTo().performTextReplacement("0")
+            rule.onNodeWithText("Apply split").assertIsNotEnabled()
+            rule.onNode(editableLedgerField("Parts for You")).performScrollTo().performTextReplacement("1")
+            rule.onNode(editableLedgerField("Parts for Alice")).performScrollTo().performTextReplacement("2")
+            androidx.test.espresso.Espresso.closeSoftKeyboard()
+            rule.onNodeWithText("More split options").performScrollTo().performClick()
+            rule.onNodeWithText("Save as group default").performScrollTo().performClick()
+            rule.onNode(editableLedgerField("Saved group name")).performTextInput("Parts dinner")
+            androidx.test.espresso.Espresso.closeSoftKeyboard()
+            rule.onNodeWithText("Save default").performClick()
+            rule.waitUntil(15000) { runBlocking { r.groupPresets().size == 1 } }
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Save default").fetchSemanticsNodes().isEmpty() }
+            val preview = runBlocking { r.groupPresets().single().preview(90000) }
+            assertEquals(30000L, preview.personalMinor)
+            assertEquals(listOf(60000L, 0L), preview.others.map { it.amountMinor })
+            rule.onNodeWithText("Apply split").performClick()
+            rule.waitUntil(15000) { !showing.value }
+            assertEquals(334L, runBlocking { r.get(id)!!.personalShareMinor })
+            assertEquals(listOf(667L, 0L), runBlocking { r.groupSharesFor(id).map { it.amountMinor } })
+            assertEquals(667L, runBlocking { r.snapshot().outstandingRepayments.toLong() })
+        } finally { runBlocking { r.eraseAll(); r.close() } }
+    }
+
     @Test fun person_drilldown_records_partial_cash_and_keeps_other_balance_unchanged() {
         val r = repo()
         try {

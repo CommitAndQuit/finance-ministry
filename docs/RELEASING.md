@@ -243,9 +243,40 @@ separate release gates; configuring signing does not close them.
 
 ## Play submission handoff — draft, not submitted
 
-Reviewed 3 October 2026. The items below describe the current offline, free build.
+Reviewed 16 October 2026. The items below describe the current offline, free build.
 Recheck them against the exact signed bundle and all active Play versions before
 submission. Adding billing, analytics, cloud sync or a new SDK requires another review.
+
+### Current first-submission status
+
+The owner has not created a Play Console account. The dedicated support address is
+financeministrysupport@gmail.com. Account creation, identity verification, public contact details,
+signing enrolment and submission have not been completed. Local release builds
+without upload credentials are validation candidates only, even if compilation
+and lint pass. Keep alpha releases separate from production submissions;
+assign a production upload a fresh version code above all previous distributions.
+
+Before paying for registration, confirm the appropriate account type. Google's
+[account-type guidance](https://support.google.com/googleplay/android-developer/answer/13634885?hl=en)
+includes financial products/services under organization accounts, and its
+[financial policy](https://support.google.com/googleplay/android-developer/answer/9876821?hl=en)
+defines the scope broadly to include money management. This local expense tracker
+does not execute payments, lend, trade or advise; do not infer that either an
+organization account or a personal-account exception is already established.
+If the registration flow is unclear, seek Google's classification before paying.
+Do not describe the app as a government service because of its name.
+
+Create a dedicated Google account with recovery and two-step verification, and
+a monitored public support/privacy email. Account registration involves accepting
+Google's agreement and a one-time US$25 fee; the owner completes payment and identity
+steps. Confirm the public developer identity and any address disclosure in the
+actual registration flow. See [registration requirements](https://support.google.com/googleplay/android-developer/answer/6112435?hl=en).
+
+Prepare in parallel: store copy, a 512 x 512 PNG icon, a 1024 x 500 feature graphic,
+at least two genuine phone screenshots with synthetic data, a stable public HTML
+privacy URL, SMS declaration evidence and the signed bundle. Existing teaser and
+walkthrough videos are marketing material, not proof of permission flows from the
+exact upload candidate. Asset requirements: [Google Play preview assets](https://support.google.com/googleplay/android-developer/answer/9866151?hl=en).
 
 ### Store listing copy
 
@@ -253,7 +284,7 @@ submission. Adding billing, analytics, cloud sync or a new SDK requires another 
 - Suggested category: **Finance**.
 - Short description: **Track spending from SMS, review transactions, and keep your ledger on device.**
 - Website/source: https://github.com/hk121902-stack/finance-ministry
-- Support and privacy contact: owner must supply a monitored address for Play Console;
+- Support and privacy contact: financeministrysupport@gmail.com; monitor this inbox.
   repository issues are not a substitute for required developer contact fields.
 - Privacy-policy URL: publish the reviewed `docs/PRIVACY.md` content as a stable public
   HTML page; verify it loads without sign-in or geographic restrictions before entering
@@ -261,7 +292,7 @@ submission. Adding billing, analytics, cloud sync or a new SDK requires another 
 
 Suggested full description:
 
-> Finance Ministry is an independent, open-source personal expense tracker. Its core
+> Finance Ministry is an independent personal expense tracker. Its core
 > feature turns supported financial SMS alerts into an on-device ledger after you
 > choose to enable SMS access. It is not a government service, bank or payment app.
 >
@@ -353,6 +384,9 @@ transparent permission and privacy disclosures.
    artifact, not just a separately signed local APK. Archive checksums and R8 mapping.
 4. Complete physical Redmi/background capture, reinstall/recovery and representative
    device checks, including a 16 KB runtime. Static ELF/ZIP alignment alone is not runtime proof.
+   Recheck the current [16 KB compatibility guidance](https://developer.android.com/guide/practices/page-sizes)
+   and the actual Console checks; deadlines and exceptions can change. SQLCipher
+   brings native libraries even though application code is Kotlin.
 5. Publish and verify the public policy URL, review listing/screenshots and submit
    declarations. Production approval, not an exception rationale, is the gate.
 6. For personal accounts created after 13 November 2023, the current requirement is a

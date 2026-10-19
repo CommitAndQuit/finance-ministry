@@ -5,6 +5,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GroupPresetAccountingTest {
+    @Test fun resaving_an_unchanged_preview_keeps_the_original_ratio_but_edits_replace_it() {
+        val preset = GroupPreset(GroupPresetEntity("p", "Dinner", "Custom", 100, 1, 1),
+            listOf(GroupPresetMemberEntity("m", "p", "alice", 0, 200)))
+        val preview = preset.preview(1001)
+        assertEquals(listOf(100L, 200L), preset.weightsForDefault(1001, preview.personalMinor, preview.others))
+        assertEquals(listOf(30000L, 60000L), GroupPresetAccounting.custom(90000,
+            preset.weightsForDefault(1001, preview.personalMinor, preview.others)))
+        assertEquals(listOf(400L, 601L), preset.weightsForDefault(1001, 400, listOf(MemberShareInput("alice", 601))))
+        assertEquals(listOf(334L, 667L), preset.weightsForDefault(1001, 334, listOf(MemberShareInput("bob", 667))))
+    }
+
     // Break caught: reusing stored paise as fixed amounts instead of applying the default ratio.
     @Test fun custom_default_scales_to_the_new_expense_and_preserves_every_paise() {
         assertEquals(listOf(250L, 501L, 250L), GroupPresetAccounting.custom(1001, listOf(1L, 2L, 1L)))

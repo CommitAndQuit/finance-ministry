@@ -52,6 +52,26 @@ class CompletedLayoutIngestionTest {
         assertEquals(7850L, repo.snapshot().personalSpend.toLong())
     }
 
+    @Test fun received_one_card_refund_is_saved_for_review_without_inventing_a_purchase_link() = withLedger { repo ->
+        val sms = IncomingSms("AD-EXBANK", System.currentTimeMillis(),
+            "Refund of Rs.42.19 from DEMO.ae received on your Federal Bank  One Credit Card. This will be adjusted against your outstanding dues. Check details: https://example.com/refund")
+        assertTrue(repo.ingest(sms))
+        val row = repo.snapshot().rows.single()
+        assertEquals(4219L, row.amountMinor)
+        assertEquals("Credit", row.direction)
+        assertEquals("Successful", row.status)
+        assertEquals("Card", row.channel)
+        assertEquals("Refund", row.transactionType)
+        assertEquals("DEMO.ae", row.counterpartyLabel)
+        assertEquals("NeedsReview", row.reviewState)
+        assertNull(row.linkedOriginalId)
+        assertNull(row.maskedAccountHint)
+        assertFalse(repo.ingest(sms))
+        assertEquals(1, repo.reviewCount())
+        assertEquals(0L, repo.snapshot().credit.toLong())
+        assertEquals(0L, repo.snapshot().personalSpend.toLong())
+    }
+
     @Test fun merchant_confirmation_and_wallet_funding_are_stored_for_review_without_changing_totals() = withLedger { repo ->
         val time = System.currentTimeMillis()
         assertTrue(repo.ingest(IncomingSms("AD-EXBANK", time,

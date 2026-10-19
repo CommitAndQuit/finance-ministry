@@ -1,8 +1,8 @@
 # Privacy and data handling
 
-Updated 11 October 2026. Finance Ministry is an independent open-source app
+Updated 19 October 2026. Finance Ministry is an independent app
 maintained by hk121902-stack, not a government service or a bank. Support is
-available through [GitHub issues](https://github.com/hk121902-stack/finance-ministry/issues);
+available at [financeministrysupport@gmail.com](mailto:financeministrysupport@gmail.com);
 share synthetic examples only. Use the private reporting route in SECURITY.md
 for vulnerabilities. The app includes offline-readable privacy information under
 Settings → Data and privacy.
@@ -46,7 +46,7 @@ columns. No raw-message debug logging or upload feature is included. Input filte
 cannot prove arbitrary manually entered text is non-sensitive; do not paste messages,
 contact names, full account numbers, UPI IDs or OTPs into labels or notes.
 
-The unreleased local group-split feature stores optional reusable participant
+The local group-split feature stores optional reusable participant
 nicknames, stable local IDs, individual shares and settlement allocations in the
 encrypted ledger. Use nicknames, not contact details. It never reads contacts,
 invites people or syncs balances. Encrypted backups include these records; CSV
@@ -87,6 +87,16 @@ it remains an unencrypted report, not a restore backup.
 Official alpha downloads are debuggable. Someone with an authorized debugging
 connection can inspect the app; use sample data and a test device. No production
 security certification or regulatory approval is claimed.
+
+## Support email
+
+Contact **financeministrysupport@gmail.com** for bugs or feature requests through
+Settings → Help & feedback. This opens your email app with the app version and
+a blank report template. You review and send the email yourself. The app does not
+attach transactions, SMS, logs, backups or screenshots. If no email app is available,
+you can copy the support address and use another email service. Your email provider
+handles the information you choose to send under its own policies. Remove private
+details from any screenshots or examples you add.
 
 GitHub handles repository visits, issues and downloads under its own policies. Only
 share synthetic examples when reporting a bug. See [Security](../SECURITY.md) for

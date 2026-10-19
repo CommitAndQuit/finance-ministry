@@ -106,6 +106,24 @@ class FinancialSmsParserTest {
         }
     }
 
+    @Test fun icici_alphanumeric_recipient_is_one_outgoing_payment() {
+        val result = parse("ICICI Bank Acct XX000 debited for Rs 44.00 on 01-Oct-26; testji123456 o credited. UPI:000000000000. Call 18002662 for dispute. SMS BLOCK 000 to 9215676766.")
+        assertEquals(ParseDecision.Record, result.decision)
+        assertEquals(4400L, result.amountMinor)
+        assertEquals(Direction.Debit, result.direction)
+        assertEquals(TransactionStatus.Successful, result.status)
+        assertEquals(Channel.UPI, result.channel)
+    }
+
+    @Test fun icici_alphanumeric_recipient_does_not_hide_another_movement() {
+        val start = "ICICI Bank Acct XX000 debited for Rs 44.00 on 01-Oct-26; "
+        for (tail in listOf(
+            "test123 account credited. UPI:000000000000.",
+            "test123 not credited. UPI:000000000000.",
+            "test123 o credited. UPI:000000000000. INR 10 credited to your account."
+        )) assertFalse(parse(start + tail).decision == ParseDecision.Record)
+    }
+
     @Test fun mixed_movement_exceptions_do_not_guess_or_merge_events() {
         val start = "ICICI Bank Acct XX000 debited for Rs 42.00 on 06-Sep-26; "
         for (tail in listOf(

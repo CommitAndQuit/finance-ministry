@@ -14,7 +14,7 @@ internal object ParserRules {
     // A bounded single-payment template: the masked customer account loses money;
     // the named recipient receives it. Do not generalize this to arbitrary mixed events.
     private val iciciDebitRecipientCredit = Regex(
-        """icici\s+bank\s+acct\s+[x*]+\d{3,4}\s+debited\s+for\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s+on\s+\d{2}-[a-z]{3}-\d{2};\s*(?<recipient>[a-z][a-z .&'-]{0,79})\s+credited\.\s*upi:\s*\d{12}\.""" +
+        """icici\s+bank\s+acct\s+[x*]+\d{3,4}\s+debited\s+for\s+(?:rs\.?|inr|₹)\s*[\d,.]+\s+on\s+\d{2}-[a-z]{3}-\d{2};\s*(?<recipient>[a-z][a-z0-9 .&'-]{0,79})\s+credited\.\s*upi:\s*\d{12}\.""" +
             """(?:\s+call\s+\d{8,15}\s+for\s+dispute\.\s+sms\s+block\s+\d{3,4}\s+to\s+\d{8,15}\.)?"""
     )
     private val accountOrMovement = Regex("""\b(?:accounts?|acct|a/c|debited|credited|transferred|not)\b""")

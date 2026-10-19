@@ -68,6 +68,8 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
         initial.isEmpty() || listOf(personal) + initial.map { it.amountMinor } == GroupSplitAccounting.equal(total, initial.size + 1)
     }
     var equal by rememberSaveable { mutableStateOf(initiallyEqual) }
+    var byParts by rememberSaveable { mutableStateOf(false) }
+    var parts by rememberSaveable { mutableStateOf("{}") }
     val initialAmounts = remember { JSONObject().put("you", shareDecimal(personal)).apply {
         initial.forEach { put(it.memberId, shareDecimal(it.amountMinor)) }
     }.toString() }
@@ -83,7 +85,7 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
     var rename by rememberSaveable { mutableStateOf("") }
     var moreOptions by rememberSaveable { mutableStateOf(false) }
     val focus = LocalFocusManager.current
-    val dirty = ids != initial.map { it.memberId } || amounts != initialAmounts || equal != initiallyEqual
+    val dirty = ids != initial.map { it.memberId } || amounts != initialAmounts || equal != initiallyEqual || byParts || parts != "{}"
     val close = { if (!busy) { if (dirty) discard = true else onDismiss() }; Unit }
     BackHandler { close() }
     LaunchedEffect(Unit) {
@@ -96,11 +98,19 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
     // its child must not observe new IDs while using an older calculated list.
     val selectedIds = ids
     val equalMode = equal
+    val partsMode = byParts
     val amountTexts = JSONObject(amounts)
+    val partTexts = JSONObject(parts)
     val equalAmounts = if (selectedIds.isEmpty()) listOf(total) else GroupSplitAccounting.equal(total, selectedIds.size + 1)
     val custom = try { listOf(parseShare(amountTexts.optString("you"))) + selectedIds.map { parseShare(amountTexts.optString(it)) } }
         catch (_: Exception) { null }
-    val values = if (equalMode) equalAmounts else custom
+    val weights = try { GroupSplitAccounting.partWeights((listOf("you") + selectedIds).map { partTexts.optString(it, "1") }) }
+        catch (_: IllegalArgumentException) { null }
+    val values = when {
+        partsMode -> weights?.let { GroupPresetAccounting.custom(total, it) }
+        equalMode -> equalAmounts
+        else -> custom
+    }
     val sum = values?.fold(BigInteger.ZERO) { n, v -> n + BigInteger.valueOf(v) }
     val valid = ready && selectedIds.isNotEmpty() && selectedIds.size <= 20 && sum == BigInteger.valueOf(total)
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { it != SheetValue.Hidden || !dirty && !busy })
@@ -126,25 +136,38 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
                     }
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    LedgerChoiceChip(equalMode, { equal = true; error = null }, label = { Text("Split equally") }, enabled = !busy,
+                    LedgerChoiceChip(equalMode, { equal = true; byParts = false; error = null }, label = { Text("Split equally") }, enabled = !busy,
                         shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
-                    LedgerChoiceChip(!equalMode, {
-                        if (equalMode) {
-                            amounts = JSONObject().put("you", shareDecimal(equalAmounts[0])).apply {
-                                selectedIds.forEachIndexed { i, id -> put(id, shareDecimal(equalAmounts[i + 1])) }
+                    LedgerChoiceChip(!equalMode && !partsMode, {
+                        if (equalMode || partsMode) {
+                            val current = values ?: equalAmounts
+                            amounts = JSONObject().put("you", shareDecimal(current[0])).apply {
+                                selectedIds.forEachIndexed { i, id -> put(id, shareDecimal(current[i + 1])) }
                             }.toString()
                         }
-                        equal = false; error = null
+                        equal = false; byParts = false; error = null
                     }, label = { Text("Custom amounts") }, enabled = !busy,
                         shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
+                    LedgerChoiceChip(partsMode, { equal = false; byParts = true; error = null }, label = { Text("By parts") }, enabled = !busy,
+                        shape = RoundedCornerShape(10.dp), modifier = Modifier.heightIn(min = 48.dp))
                 }
+                if (partsMode) Text("Enter each person's parts. For ₹900, 1 part and 2 parts become ₹300 and ₹600. Zero parts is allowed; at least one must be positive. Extra paise go to the largest remainder, then the order below.", style = MaterialTheme.typography.bodySmall)
                 if (equalMode && total % (selectedIds.size + 1) != 0L) Text("Extra paise go to You, then people in the order below.", style = MaterialTheme.typography.bodySmall)
+                if (partsMode) {
+                    (listOf("you") + selectedIds).forEachIndexed { i, id ->
+                        val name = if (id == "you") "You" else members.firstOrNull { it.id == id }?.name ?: "Loading person…"
+                        SplitPartRow(name, partTexts.optString(id, "1"), values?.get(i), !busy) {
+                            parts = JSONObject(parts).put(id, it.take(12)).toString(); error = null
+                        }
+                    }
+                } else {
                 SplitShareRow("You", if (equalMode) equalAmounts[0] else null, amountTexts.optString("you"), !busy,
                     { setAmount("you", it) })
                 selectedIds.forEachIndexed { i, id ->
                     val name = members.firstOrNull { it.id == id }?.name ?: "Loading person…"
                     SplitShareRow(name, if (equalMode) equalAmounts[i + 1] else null, amountTexts.optString(id), !busy,
                         { setAmount(id, it) })
+                }
                 }
                 TextButton(onClick = { focus.clearFocus(); choose = true }, enabled = ready && !busy, contentPadding = PaddingValues(0.dp)) {
                     LedgerIcon("plus", Modifier.size(16.dp)); Spacer(Modifier.width(5.dp)); Text("Add or manage people")
@@ -176,7 +199,7 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     when {
                         selectedIds.isEmpty() -> Text("Add at least one person besides you.", style = MaterialTheme.typography.bodySmall)
-                        sum == null -> Text("Enter a valid amount for every share.", style = MaterialTheme.typography.bodySmall)
+                        sum == null -> Text(if (partsMode) "Enter valid parts for everyone; at least one must be greater than zero." else "Enter a valid amount for every share.", style = MaterialTheme.typography.bodySmall)
                         sum < BigInteger.valueOf(total) -> Text("Remaining to assign: ${money(BigInteger.valueOf(total) - sum)}", style = MaterialTheme.typography.bodySmall)
                         sum > BigInteger.valueOf(total) -> Text("Shares exceed the expense by ${money(sum - BigInteger.valueOf(total))}", color = MaterialTheme.colorScheme.error)
                         else -> Text("${selectedIds.size + 1} people · Total ${money(total)}", style = MaterialTheme.typography.bodySmall)
@@ -209,7 +232,7 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
                     TextButton(enabled = !busy, onClick = {
                         try {
                             val preview = preset.preview(total)
-                            ids = preview.others.map { it.memberId }; equal = preset.equal
+                            ids = preview.others.map { it.memberId }; equal = preset.equal; byParts = false; parts = "{}"
                             amounts = JSONObject().put("you", shareDecimal(preview.personalMinor)).apply {
                                 preview.others.forEach { put(it.memberId, shareDecimal(it.amountMinor)) }
                             }.toString()
@@ -246,8 +269,11 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
                         if (renamePresetId != null) repository.renameGroupPreset(renamePresetId!!, presetName)
                         else {
                             require(valid) { "Check the split before saving a default." }
-                            selectedPresetId = repository.saveGroupPreset(presetName, equalMode, values!![0],
-                                selectedIds.mapIndexed { i, id -> MemberShareInput(id, values[i + 1]) }, updatePresetId).id
+                            // Preserve the entered ratio, not its rounded paise allocation.
+                            val defaults = if (partsMode) weights!! else presets.firstOrNull { it.id == selectedPresetId }
+                                ?.weightsForDefault(total, values!![0], selectedIds.mapIndexed { i, id -> MemberShareInput(id, values[i + 1]) }) ?: values!!
+                            selectedPresetId = repository.saveGroupPreset(presetName, equalMode, defaults[0],
+                                selectedIds.mapIndexed { i, id -> MemberShareInput(id, defaults[i + 1]) }, updatePresetId).id
                         }
                         presets = repository.groupPresets(); presetMessage = "Saved group default. Recorded expenses are unchanged."
                         savePreset = false; renamePresetId = null; error = null
@@ -336,6 +362,17 @@ internal fun GroupSplitEditor(repository: TransactionRepository, total: Long, pe
                 finally { busy = false }
             }
         }) { Text("Remove shares") } }, dismissButton = { TextButton(onClick = { remove = false }, enabled = !busy) { Text("Cancel") } })
+}
+
+@Composable private fun SplitPartRow(name: String, value: String, calculated: Long?, enabled: Boolean, onChange: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(name, style = MaterialTheme.typography.bodyMedium)
+            Text(calculated?.let(::money) ?: "—", style = MaterialTheme.typography.titleSmall)
+        }
+        LedgerTextInput(value, onChange, label = "Parts for $name", singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.width(130.dp), enabled = enabled)
+    }
 }
 
 @Composable private fun SplitShareRow(name: String, fixed: Long?, value: String, enabled: Boolean, onChange: (String) -> Unit) {

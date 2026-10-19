@@ -19,6 +19,13 @@ data class GroupPreset(val record: GroupPresetEntity, val members: List<GroupPre
     val id get() = record.id
     val name get() = record.name
     val equal get() = record.splitMode == "Equal"
+    /** Re-saving an unchanged preview must not replace its ratio with rounded paise. */
+    fun weightsForDefault(total: Long, personal: Long, others: List<MemberShareInput>): List<Long> {
+        val current = preview(total)
+        return if (!equal && personal == current.personalMinor && others == current.others)
+            listOf(record.personalWeight) + members.map { it.weight }
+        else listOf(personal) + others.map { it.amountMinor }
+    }
     fun preview(total: Long): GroupPresetPreview {
         require(record.splitMode in setOf("Equal", "Custom") && members.size in 1..20 &&
             members.map { it.memberId }.distinct().size == members.size) { "Check this saved group's local people and split." }

@@ -6,18 +6,16 @@ An Android expense tracker that records transactions from incoming SMS and lets 
 
 **Status: early alpha.** The release channel is for installable **debug APKs** for testing. The app is being developed by one maintainer and is not ready for general use. Parsing can miss or misclassify transactions; check your records. Do not make this your only financial record.
 
-The latest published debug alpha is **v0.1.0-alpha.20**, available from
-[GitHub Releases](https://github.com/hk121902-stack/finance-ministry/releases).
-The current development changes are **unreleased**; a local build is not the next
-official APK and must not be used as proof that an official in-place update works.
+This source targets **v0.1.0-alpha.22**. Check
+[GitHub Releases](https://github.com/hk121902-stack/finance-ministry/releases)
+for published downloads; a local build is not an official APK.
 Download the debug APK from its assets. The release includes its SHA-256 checksum,
 signing-certificate details, and license notices. Physical-device testing is pending.
 
 ## What works today
 
-This guide describes the current source, including the unreleased refresh below.
-Published alpha.20 uses the earlier Overview/Transactions layout; it does not yet
-include the new Home/Activity/People/Review presentation or saved group defaults.
+This guide describes the current source. The Home/Activity/People/Review refresh
+and saved group defaults shipped in alpha.21; alpha.22 adds the improvements below.
 
 - Explore a skippable, twelve-chapter **App tour** on first launch and once after
   each update. Back/Next and optional More detail explain all current features;
@@ -27,6 +25,12 @@ include the new Home/Activity/People/Review presentation or saved group defaults
 - Save a normalized transaction first, then send an optional native notification with **View** and **Edit**.
 - Keep uncertain detections in **Review**, including transactions whose amount could not be safely extracted.
 - Add manual transactions with money-in/out choices, date/time pickers and optional details.
+- Add an optional **Description** in the full transaction editor. Existing notes
+  remain searchable and are included in encrypted backups.
+- Use **Settings → Help & feedback** to draft a bug report or feature request to
+  financeministrysupport@gmail.com. You review and send it yourself; no ledger,
+  messages, logs or attachments are automatically included. Copy the address if
+  no email app is installed.
 - Use separate Home and Settings screens, light/dark themes and unsaved-edit warnings.
 - Use **Home**, searchable and filterable **Activity**, individual balances in
   **People**, and a separate all-dates **Review** queue. Select visible transactions to update their
@@ -69,7 +73,7 @@ include the new Home/Activity/People/Review presentation or saved group defaults
 
 The app has no account, cloud sync, ads, analytics, payment initiation, bank API connection, or Internet permission. It supports new incoming SMS and optional history import without becoming the default SMS app.
 
-### Unreleased refresh
+### Current interface and accounting
 
 - A warm light theme and clearer dark theme, quieter rows and fields, focused
   editing sheets, and reachable Close/Save actions while scrolling or using the keyboard.
@@ -86,15 +90,21 @@ The app has no account, cloud sync, ads, analytics, payment initiation, bank API
 - Reversible **Not a transaction**, clearer capture/permission recovery, optional backup
   reminders, System/Light/Dark appearance and an updated skippable app tour.
 
-Verification is still in progress. See [Unreleased changes](CHANGELOG.md#unreleased)
-for scope and upgrade restrictions; do not assume these changes are in alpha.20.
+See the [changelog](CHANGELOG.md) and version-specific release notes for verification,
+known limitations and upgrade restrictions. Passing emulator checks is not proof
+of every physical phone's background SMS behavior.
 
 ### Individual group splits
 
 For a repayable **Group** expense, choose **Split with people**. Add reusable local
-nicknames and choose Equal or Custom. You are included: ₹900 split between You,
+nicknames and choose Equal, Custom amounts or By parts. You are included: ₹900 split between You,
 Alice and Bob gives each a ₹300 share. Custom amounts must add up exactly; equal
 splits distribute leftover paise starting with You, then the displayed people.
+**By parts** supports unequal proportions: ₹900 at 1:2 becomes ₹300 and ₹600.
+Decimal and zero parts are allowed if at least one share is positive. Rounding
+uses largest remainders, breaking ties in the displayed order, so no paise is lost.
+Save a group default to reuse the proportions. Recorded payments retain their exact
+rupee shares; reopening a payment shows those amounts, not the original parts input.
 In a transaction form, Apply split updates the draft; save the payment to record it.
 
 **People → Outstanding / Settled** shows individual balances and expense drilldowns.
@@ -107,9 +117,8 @@ guessed from payer text; unlink and explicitly relink old repayments to assign p
 Nicknames, shares and receipts are included in password-encrypted backups; older
 supported backups remain readable. CSV schema 3 adds individual shares, repayments and unpaid
 amounts (unencrypted, including nicknames). No contacts access, invitations or sync.
-Published alpha.20 supports schema-8 backups. The unreleased saved-group update
-uses schema 9: its backups require a schema-9-capable release and **cannot be restored
-by the published alpha.20**. Do not downgrade an updated installation.
+Alpha.21 and alpha.22 use schema 9: their backups require a schema-9-capable release
+and **cannot be restored by alpha.20 or older**. Do not downgrade an updated installation.
 Check GitHub Releases for the latest published APK; a release candidate is not a
 published download until its pre-release is available there.
 

@@ -9,8 +9,8 @@
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_finance_ministry"
-        android:roundIcon="@drawable/ic_finance_ministry"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="Finance Ministry"
         android:theme="@style/Theme.FinanceMinistry"
         android:name=".FinanceMinistryApp">

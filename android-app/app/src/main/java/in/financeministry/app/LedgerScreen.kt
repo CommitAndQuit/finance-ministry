@@ -560,6 +560,7 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
                         SettingsRow("Appearance", "${appearance.name} theme", icon = "moon") { settingsSection = "Appearance" }
                         SettingsRow("Backup & restore", "Protect your local ledger") { settingsSection = "Backup & export" }
                         SettingsRow("Payment sources", "Bank accounts, cards & UPI") { settingsSection = "Payment sources" }
+                        SettingsRow("Help & feedback", "Report a bug or suggest a feature") { settingsSection = "Help & feedback" }
                         SettingsRow("More settings", "Rules, reminders, privacy and other tools", icon = if (advancedSettings) "back" else "down") {
                             advancedSettings = !advancedSettings
                         }
@@ -595,6 +596,7 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
                             }
                         }
                     }
+                    "Help & feedback" -> `in`.financeministry.app.feature.SupportPanel()
                     "Personalization" -> {
                         Text("A name is optional and stays on this device.", style = MaterialTheme.typography.bodySmall)
                         OutlinedTextField(value = preferredNameDraft, onValueChange = { preferredNameDraft = it.take(40) },
@@ -746,7 +748,8 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
             TextButton(onClick = { selected = null; selectedId = originalId }) { Text("View linked original transaction") }
             Text("Linked by matching reference, account, channel and full amount.", style = MaterialTheme.typography.bodySmall)
         }
-        row.maskedAccountHint?.let { Text(it, style = MaterialTheme.typography.bodySmall) }; row.userNotes?.let { Text(it) }
+        row.maskedAccountHint?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        row.userNotes?.let { Text("Description", style = MaterialTheme.typography.labelMedium); Text(it) }
         `in`.financeministry.app.feature.RepaymentHistoryPanel(repository, row,
             RepaymentAccounting.eligible(row, snapshot?.reversedOriginalIds.orEmpty()))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
