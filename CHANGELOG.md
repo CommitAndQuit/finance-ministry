@@ -4,6 +4,13 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.23 — Play testing candidate (not published)
+
+- Prepare a non-debuggable, minified Android App Bundle for Play testing with a
+  new version code. Play App Signing retains the existing official-alpha signing
+  identity; a separate upload key authenticates bundle uploads. This does not
+  establish a tested Play-delivered upgrade or production/SMS-policy approval.
+
 - Simplify named default categories to Grocery, Food, Entertainment, Bills,
   Transport and Investment, with Other for uncategorized payments. Preserve used
   older categories, custom labels, saved tools and encrypted-backup compatibility.

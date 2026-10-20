@@ -250,22 +250,28 @@ submission. Adding billing, analytics, cloud sync or a new SDK requires another 
 
 ### Current first-submission status
 
-The owner has not created a Play Console account. The dedicated support address is
-financeministrysupport@gmail.com. Account creation, identity verification, public contact details,
-signing enrolment and submission have not been completed. Local release builds
-without upload credentials are validation candidates only, even if compilation
-and lint pass. Keep alpha releases separate from production submissions;
-assign a production upload a fresh version code above all previous distributions.
+The owner has created and verified a Personal Play Console account. The dedicated
+support address is financeministrysupport@gmail.com. Store listing and app-content
+declarations are saved and ready to send for review; they have not been submitted
+or approved. Initial targeting is India, adults 18+. Play App Signing now uses the
+existing alpha signing identity, with a separate registered upload certificate.
+Portable/off-device keystore and password backups remain an owner responsibility.
+Version 0.1.0-alpha.23 / code 23 is the first hardened Play testing candidate, not a
+published release. Local release builds without upload credentials remain unsigned
+validation candidates even if compilation and lint pass. Keep GitHub debug-alpha
+releases separate from Play submissions; never reuse a distributed version code.
 
-Before paying for registration, confirm the appropriate account type. Google's
+Google's
 [account-type guidance](https://support.google.com/googleplay/android-developer/answer/13634885?hl=en)
 includes financial products/services under organization accounts, and its
 [financial policy](https://support.google.com/googleplay/android-developer/answer/9876821?hl=en)
 defines the scope broadly to include money management. This local expense tracker
 does not execute payments, lend, trade or advise; do not infer that either an
 organization account or a personal-account exception is already established.
-If the registration flow is unclear, seek Google's classification before paying.
-Do not describe the app as a government service because of its name.
+The owner's verified Personal account does not by itself establish app-specific
+financial-feature eligibility or restricted-SMS approval; resolve any objection
+Google raises during review. Do not describe the app as a government service
+because of its name.
 
 Create a dedicated Google account with recovery and two-step verification, and
 a monitored public support/privacy email. Account registration involves accepting
