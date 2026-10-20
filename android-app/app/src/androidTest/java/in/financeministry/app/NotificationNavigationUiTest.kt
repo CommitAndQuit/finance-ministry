@@ -49,19 +49,20 @@ class NotificationNavigationUiTest {
             rule.waitUntil(15000) { rule.onAllNodesWithText("Category & purpose").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("Family").performClick()
             rule.onNode(publicEditorChoice("Category", "Food")).performClick()
-            rule.onNodeWithText("Flat expenses").performClick()
+            // Use a fresh-ledger default; retired categories are only offered when in use.
+            rule.onNodeWithText("Bills").performClick()
             rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(publicEditorSaveButton()).performClick()
             rule.waitUntil(15000) { runBlocking { repository.get(first)?.ownership == "Family" } }
             val family = runBlocking { repository.get(first)!! }
-            org.junit.Assert.assertEquals("Flat expenses", family.category)
+            org.junit.Assert.assertEquals("Bills", family.category)
             org.junit.Assert.assertEquals(70001L, family.personalShareMinor)
             org.junit.Assert.assertNull(repaymentSummary(family))
             rule.waitUntil(15_000) { rule.onAllNodesWithContentDescription("Close transaction editor").fetchSemanticsNodes().isEmpty() }
             edit.send()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Payment details").fetchSemanticsNodes().isNotEmpty() }
             rule.onNodeWithText("700.01").assertExists()
-            rule.onNode(publicEditorChoice("Category", "Flat expenses")).assertExists()
+            rule.onNode(publicEditorChoice("Category", "Bills")).assertExists()
             rule.onNode(editableLedgerField("Amount (INR)")).performTextReplacement("701.01")
             view.send()
             rule.waitUntil(15000) { rule.onAllNodesWithText("Open another transaction?").fetchSemanticsNodes().isNotEmpty() }
