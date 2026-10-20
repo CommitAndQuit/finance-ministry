@@ -13,6 +13,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-app
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,6 +25,7 @@ jobs:
 
       - name: Determine Tag
         id: tagger
+        working-directory: .
         run: |
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
@@ -54,6 +58,7 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Create Git tag
+        working-directory: .
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
