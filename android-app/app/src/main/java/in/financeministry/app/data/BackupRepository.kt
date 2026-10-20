@@ -227,7 +227,7 @@ private fun validateBackup(root: JSONObject, db: FinanceDatabase) {
         "Unsupported backup version. Your ledger was not changed."
     }
     val data = root.getJSONObject("data")
-    val allowedCategories = (transactionCategories + decodeCustomCategories(data.getJSONArray("customCategories"))).toSet()
+    val allowedCategories = (supportedTransactionCategories + decodeCustomCategories(data.getJSONArray("customCategories"))).toSet()
     val tables = data.getJSONObject("tables")
     require(tables.keys().asSequence().toSet() == backupTables.toSet()) { "Backup tables are incomplete." }
     val rowsByTable = mutableMapOf<String, Map<String, JSONObject>>()

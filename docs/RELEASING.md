@@ -243,7 +243,8 @@ separate release gates; configuring signing does not close them.
 
 ## Play submission handoff — draft, not submitted
 
-Reviewed 16 October 2026. The items below describe the current offline, free build.
+Reviewed 20 October 2026. The items below describe the current offline build without
+billing. Commercial pricing is undecided and does not block this preparation.
 Recheck them against the exact signed bundle and all active Play versions before
 submission. Adding billing, analytics, cloud sync or a new SDK requires another review.
 
@@ -286,9 +287,15 @@ exact upload candidate. Asset requirements: [Google Play preview assets](https:/
 - Website/source: https://github.com/hk121902-stack/finance-ministry
 - Support and privacy contact: financeministrysupport@gmail.com; monitor this inbox.
   repository issues are not a substitute for required developer contact fields.
-- Privacy-policy URL: publish the reviewed `docs/PRIVACY.md` content as a stable public
-  HTML page; verify it loads without sign-in or geographic restrictions before entering
-  its URL. A local file or unhosted draft does not satisfy this requirement.
+- Privacy-policy URL: https://hk121902-stack.github.io/finance-ministry/privacy.html
+  (published 20 October 2026). Recheck that it loads without sign-in or geographic
+  restrictions before submission. The app retains offline policy text and opens the
+  hosted policy through the user's browser, without adding Internet permission.
+  The isolated `codex/privacy-site` branch contains only `.nojekyll`, `index.html`
+  and `privacy.html`; do not publish the workspace, research or private handoff folder.
+  Keep the root `index.html` and canonical `privacy.html` policy copies identical.
+  When data handling changes, update the hosted HTML and the in-app/offline policy
+  together, then verify the public page again. A local draft is not a live policy URL.
 
 Suggested full description:
 

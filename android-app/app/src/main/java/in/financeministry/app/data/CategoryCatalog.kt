@@ -1,6 +1,7 @@
 package `in`.financeministry.app.data
 
 import `in`.financeministry.app.core.model.transactionCategories
+import `in`.financeministry.app.core.model.supportedTransactionCategories
 import org.json.JSONArray
 import java.util.Locale
 
@@ -18,7 +19,10 @@ internal fun decodeCustomCategories(array: JSONArray): List<String> {
         array.getString(index)
     }
     require(names.all { it == normalizedCategoryName(it) && validCategoryName(it) }) { "Invalid custom category." }
-    val normalized = (transactionCategories + names).map { it.lowercase(Locale.ROOT) }
+    // Grocery/Transport could be custom names in older ledgers and backups.
+    // Keep their spelling instead of rewriting financial records on upgrade.
+    val reserved = transactionCategories - listOf("Grocery", "Transport")
+    val normalized = (reserved + names).map { it.lowercase(Locale.ROOT) }
     require(normalized.size == normalized.toSet().size) { "Duplicate category." }
     return names
 }
@@ -26,9 +30,14 @@ internal fun decodeCustomCategories(array: JSONArray): List<String> {
 internal fun customCategories(dao: TransactionDao): List<String> =
     decodeCustomCategories(JSONArray(dao.metadata(CUSTOM_CATEGORIES_KEY) ?: "[]"))
 
-internal fun categoryOptions(dao: TransactionDao): List<String> = transactionCategories + customCategories(dao)
+internal fun categoryOptions(dao: TransactionDao): List<String> {
+    val custom = customCategories(dao)
+    val defaults = transactionCategories.map { name -> custom.firstOrNull { it.equals(name, ignoreCase = true) } ?: name }
+    return (defaults + custom + dao.categoryNamesInUse()).distinct()
+}
 
-internal fun categoryExists(dao: TransactionDao, category: String): Boolean = category in categoryOptions(dao)
+internal fun categoryExists(dao: TransactionDao, category: String): Boolean =
+    category in supportedTransactionCategories || category in customCategories(dao)
 
 suspend fun TransactionRepository.categories(): List<String> = withLedger { categoryOptions(it.transactions()) }
 

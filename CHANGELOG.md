@@ -4,6 +4,19 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+- Simplify named default categories to Grocery, Food, Entertainment, Bills,
+  Transport and Investment, with Other for uncategorized payments. Preserve used
+  older categories, custom labels, saved tools and encrypted-backup compatibility.
+  Active category filters remain valid after their last matching payment changes.
+
+- Publish an HTTPS privacy policy and add a link in Data and privacy while keeping
+  the full policy available offline. If no browser opens, show a selectable URL
+  and the support email without attaching any financial data.
+
+- Accept fractional amounts without a leading zero, such as `.80` for ₹0.80,
+  when recording or editing repayments and manual payments. Preserve exact paise,
+  positive-amount validation and existing repayment allocation limits.
+
 ## 0.1.0-alpha.22
 
 - Split group expenses by parts (including fractional or zero parts), with exact

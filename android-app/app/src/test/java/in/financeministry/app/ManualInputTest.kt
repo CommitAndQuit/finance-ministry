@@ -34,8 +34,15 @@ class ManualInputTest {
         assertEquals(0L, family.repaidMinor())
     }
     @Test fun exact_minor_units() { assertEquals(25050L, input("250.50").amountMinor()); input("1").validate() }
+    @Test fun fractional_amounts_without_a_leading_zero_keep_exact_paise() {
+        listOf(".80" to 80L, ".8" to 80L, ".01" to 1L, "0.80" to 80L).forEach { (text, paise) ->
+            input(text).validate()
+            assertEquals(paise, input(text).amountMinor())
+        }
+    }
     @Test fun rejects_invalid_amounts() {
-        listOf("", "-1", "0", "1.234", "NaN", "92233720368547759", "1e4", "1,000").forEach {
+        listOf("", "-1", "0", "1.234", "NaN", "92233720368547759", "1e4", "1,000",
+            ".", ".0", ".00", ".001", "-.80", ".8e1", "1.", ".80.1").forEach {
             assertThrows(IllegalArgumentException::class.java) { input(it).validate() }
         }
     }

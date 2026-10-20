@@ -117,6 +117,8 @@ data class TransactionResultTotals(val count: Long, val debit: Long, val credit:
 
 @Dao
 interface TransactionDao {
+    @Query("SELECT DISTINCT category FROM (SELECT category FROM transactions UNION SELECT category FROM category_rules UNION SELECT category FROM budgets UNION SELECT category FROM recurring_reminders) ORDER BY category COLLATE NOCASE, category")
+    fun categoryNamesInUse(): List<String>
     @Query("SELECT * FROM local_members ORDER BY name COLLATE NOCASE, id") fun members(): List<LocalMemberEntity>
     @Query("SELECT * FROM local_members WHERE id = :id") fun member(id: String): LocalMemberEntity?
     @Insert fun addMember(row: LocalMemberEntity)

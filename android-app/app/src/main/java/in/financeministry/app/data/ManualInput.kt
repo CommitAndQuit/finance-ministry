@@ -15,7 +15,7 @@ data class ManualInput(
     val groupShares: List<MemberShareInput>? = null,
 ) {
     fun amountMinor(): Long {
-        require(amount.matches(Regex("[0-9]{1,16}(\\.[0-9]{1,2})?"))) { "Enter a positive amount with up to two decimal places." }
+        require(amount.matches(Regex("(?:[0-9]{1,16}(\\.[0-9]{1,2})?|\\.[0-9]{1,2})"))) { "Enter a positive amount with up to two decimal places." }
         val value = try { BigDecimal(amount).movePointRight(2).longValueExact() } catch (_: ArithmeticException) { 0L }
         require(value > 0) { "Amount must be positive and within the supported range." }
         return value

@@ -2,7 +2,7 @@
 
 An Android expense tracker that records transactions from incoming SMS and lets you add or correct them yourself.
 
-[Download alpha APKs](https://github.com/hk121902-stack/finance-ministry/releases) · [Roadmap](docs/ROADMAP.md) · [Privacy](docs/PRIVACY.md) · [Report a bug](https://github.com/hk121902-stack/finance-ministry/issues/new/choose)
+[Download alpha APKs](https://github.com/hk121902-stack/finance-ministry/releases) · [Roadmap](docs/ROADMAP.md) · [Privacy](https://hk121902-stack.github.io/finance-ministry/privacy.html) · [Report a bug](https://github.com/hk121902-stack/finance-ministry/issues/new/choose)
 
 **Status: early alpha.** The release channel is for installable **debug APKs** for testing. The app is being developed by one maintainer and is not ready for general use. Parsing can miss or misclassify transactions; check your records. Do not make this your only financial record.
 
@@ -16,6 +16,8 @@ signing-certificate details, and license notices. Physical-device testing is pen
 
 This guide describes the current source. The Home/Activity/People/Review refresh
 and saved group defaults shipped in alpha.21; alpha.22 adds the improvements below.
+Items under **Unreleased** in the changelog, including the smaller category catalog,
+fractional-amount fix and online policy link, are not in the existing alpha.22 download.
 
 - Explore a skippable, twelve-chapter **App tour** on first launch and once after
   each update. Back/Next and optional More detail explain all current features;
@@ -38,11 +40,12 @@ and saved group defaults shipped in alpha.21; alpha.22 adds the improvements bel
 - Set an optional on-device home greeting and filter transactions by category, purpose,
   money flow or origin. Filter-result totals use the same accounting rules as Home,
   applied to the matching records; they never replace whole-month totals.
-- Add your own categories from the transaction form, or use the built-in Income and
-  Investment categories. Categories are local labels; they do not change money-in/out
+- Add your own categories from the transaction form, or start with Grocery, Food,
+  Entertainment, Bills, Transport and Investment. Categories are local labels; they do not change money-in/out
   direction or the spending calculations. Custom categories are included in encrypted backups.
-  Built-ins: Other, Food, Travel, Shopping, Bills, Flat expenses, Health, Education,
-  Entertainment, Cash, Income and Investment. Personal, Family, Group, For someone else
+  Other remains the uncategorized fallback. Previously used categories (including
+  Income, Flat expenses and Travel) remain available; unused older suggestions no
+  longer crowd a fresh ledger. Personal, Family, Group, For someone else
   and Self transfer are separate payment purposes, not competing categories.
 - Card bill payments settle an existing card balance, so they are excluded from
   spending and money-in/out totals. Both the bank debit and issuer confirmation can

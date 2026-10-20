@@ -1,11 +1,12 @@
 # Privacy and data handling
 
-Updated 19 October 2026. Finance Ministry is an independent app
+Updated 20 October 2026. Finance Ministry is an independent app
 maintained by hk121902-stack, not a government service or a bank. Support is
 available at [financeministrysupport@gmail.com](mailto:financeministrysupport@gmail.com);
 share synthetic examples only. Use the private reporting route in SECURITY.md
 for vulnerabilities. The app includes offline-readable privacy information under
-Settings → Data and privacy.
+Settings → Data and privacy, alongside a link to the
+[public privacy policy](https://hk121902-stack.github.io/finance-ministry/privacy.html).
 
 Finance Ministry processes incoming SMS on the Android device to create a local
 transaction ledger. There is no sign-up or app backend.
@@ -98,6 +99,9 @@ you can copy the support address and use another email service. Your email provi
 handles the information you choose to send under its own policies. Remove private
 details from any screenshots or examples you add.
 
-GitHub handles repository visits, issues and downloads under its own policies. Only
+GitHub Pages hosts the public policy. GitHub handles visits to that page, the
+repository, issues and downloads under its
+[privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+Hosting the policy does not upload the app's ledger or give the app Internet access. Only
 share synthetic examples when reporting a bug. See [Security](../SECURITY.md) for
 private vulnerability reports.

@@ -66,8 +66,10 @@ class TransactionRepository(private val context: Context, private val namespace:
         val paymentKind = filterParts.firstOrNull { it in listOf("CardBills", "CardCreditsToCheck") } ?: "All"
         val categories = filterParts.filter { it.startsWith("Category:") }.map { it.removePrefix("Category:") }.distinct()
         val sourceIds = filterParts.filter { it.startsWith("Source:") }.map { it.removePrefix("Source:") }.distinct()
-        val knownCategories = if (database == null && !context.getDatabasePath(dbName).exists()) transactionCategories
-            else categoryOptions(db().transactions())
+        // A filter remains valid when its last matching record is edited/deleted,
+        // even if that retired category no longer appears among picker suggestions.
+        val knownCategories = if (database == null && !context.getDatabasePath(dbName).exists()) supportedTransactionCategories
+            else supportedTransactionCategories + customCategories(db().transactions())
         require(filter == "All" || filter == "Review" || filterParts.all {
             it in listOf("Manual", "Edited", "Personal", "Family", "ForOthers", "Group", "SelfTransfer", "Debit", "Credit", "CardBills", "CardCreditsToCheck") ||
                 (it.startsWith("Category:") && it.removePrefix("Category:") in knownCategories) ||
