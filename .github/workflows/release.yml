@@ -3,7 +3,7 @@ name: Build and Release APK
 on:
   push:
     branches:
-      - mainline
+      - main
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -31,7 +31,7 @@ jobs:
           fi
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -58,11 +58,11 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git tag -f ${{ steps.tagger.outputs.tag }}
-          git push https://x-access-token:${{ secrets.PAT }}@github.com/CommitAndQuit/s-connect.git ${{ steps.tagger.outputs.tag }} --force
-          
+          git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git ${{ steps.tagger.outputs.tag }} --force
+
       - name: Wait for tag to propagate
         run: sleep 5
-          
+
       - name: Create GitHub Release via CLI
         run: |
           gh release create ${{ steps.tagger.outputs.tag }} \
