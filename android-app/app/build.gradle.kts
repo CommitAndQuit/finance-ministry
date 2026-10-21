@@ -16,7 +16,7 @@ check(!requireAlphaSigning || !alphaKeystore.isNullOrBlank()) { "Official alpha 
 
 android {
     namespace = "in.txnsense.app"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "in.txnsense.app"
