@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.TxnSense" parent="android:style/Theme.Material.Light.NoActionBar" />
+    <style name="Theme.FinanceMinistry" parent="Theme.TxnSense" />
+    <style name="Theme.TxnSense.Picker.Light" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#3455DB</item>
+    </style>
+    <style name="Theme.TxnSense.Picker.Dark" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#A7B9FF</item>
+    </style>
+    <style name="Theme.FinanceMinistry.Picker.Light" parent="Theme.TxnSense.Picker.Light" />
+    <style name="Theme.FinanceMinistry.Picker.Dark" parent="Theme.TxnSense.Picker.Dark" />
 </resources>

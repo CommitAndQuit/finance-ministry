@@ -9,7 +9,18 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import `in`.txnsense.app.ui.LedgerTextInput
+import `in`.txnsense.app.ui.LedgerChoiceChip as FilterChip
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import `in`.txnsense.app.ui.LedgerIcon
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import `in`.txnsense.app.core.model.*
@@ -23,7 +34,7 @@ import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TransactionForm(repository: TransactionRepository, existing: TransactionEntity?, onDone: () -> Unit, onDirtyChange: (Boolean) -> Unit = {}, quickOnly: Boolean = false) {
+fun TransactionForm(repository: TransactionRepository, existing: TransactionEntity?, onDone: () -> Unit, onDirtyChange: (Boolean) -> Unit = {}, quickOnly: Boolean = false, onCancel: () -> Unit = onDone) {
     var compact by rememberSaveable(existing?.id, quickOnly) { mutableStateOf(quickOnly && existing != null) }
     val formatter = remember { DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm").withResolverStyle(java.time.format.ResolverStyle.STRICT) }
     val draftId = rememberSaveable(existing?.id) { java.util.UUID.randomUUID().toString() }
@@ -31,6 +42,7 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     var direction by rememberSaveable(existing?.id) { mutableStateOf(existing?.direction ?: "Debit") }
     var status by rememberSaveable(existing?.id) { mutableStateOf(existing?.status ?: "Successful") }
     var type by rememberSaveable(existing?.id) { mutableStateOf(existing?.transactionType ?: "Other") }
+    var previousType by rememberSaveable(existing?.id) { mutableStateOf(existing?.transactionType?.takeUnless { it in listOf("CardRepayment", "Refund") } ?: "Other") }
     var channel by rememberSaveable(existing?.id) { mutableStateOf(existing?.channel ?: "CashManual") }
     val initialDate = rememberSaveable(existing?.id) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(existing?.effectiveTimestamp ?: System.currentTimeMillis()), ZoneId.systemDefault()).format(formatter)
@@ -44,61 +56,169 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     var groupLabel by rememberSaveable(existing?.id) { mutableStateOf(existing?.groupLabel ?: "") }
     var personalShare by rememberSaveable(existing?.id) { mutableStateOf(existing?.personalShareMinor?.let { BigDecimal.valueOf(it, 2).toPlainString() } ?: "") }
     var repaid by rememberSaveable(existing?.id) { mutableStateOf(existing?.repaidMinor?.takeIf { it > 0 }?.let { BigDecimal.valueOf(it, 2).toPlainString() } ?: "") }
+    var repaymentExpected by rememberSaveable(existing?.id) { mutableStateOf(existing?.repaymentExpected ?: true) }
+    val splitDraft = rememberGroupSplitFormDraft(repository, existing)
+    var rememberCategory by rememberSaveable(existing?.id) { mutableStateOf(false) }
+    var rememberForSource by rememberSaveable(existing?.id) { mutableStateOf(false) }
     var sourceId by rememberSaveable(existing?.id) { mutableStateOf(existing?.paymentSourceId) }
-    var sources by remember { mutableStateOf<List<PaymentSourceEntity>>(emptyList()) }
-    var optional by rememberSaveable { mutableStateOf(false) }
+    val sourceLookup = paymentSourcesForForm(repository, existing?.id)
+    val sources = sourceLookup.sources
+    val sourcesReady = sourceLookup.ready
+    var availableCategories by remember { mutableStateOf(transactionCategories) }
+    var addingCategory by remember { mutableStateOf(false) }
+    val revision by repository.revision.collectAsState()
+    var detailsExpanded by rememberSaveable(existing?.id, quickOnly) { mutableStateOf(existing?.status == "Unknown" || existing?.channel == "Unknown") }
+    var optional by rememberSaveable(existing?.id, quickOnly) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val initialFields = rememberSaveable(existing?.id) { listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId) }
-    val dirty = initialFields != listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId)
+    val containerHeight = LocalWindowInfo.current.containerSize.height
+    val maxSheetHeight = (with(LocalDensity.current) { containerHeight.toDp() } - 60.dp).coerceAtLeast(48.dp)
+    val initialFields = rememberSaveable(existing?.id) { listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId, repaymentExpected.toString()) }
+    val dirty = rememberCategory || splitDraft.dirty || initialFields != listOf(amount, direction, status, type, channel, date, label, notes, hint, category, ownership, groupLabel, personalShare, repaid, sourceId, repaymentExpected.toString())
     SideEffect { onDirtyChange(dirty) }
-    LaunchedEffect(existing?.id) { sources = repository.paymentSources() }
-    val pickerTheme = if (androidx.compose.foundation.isSystemInDarkTheme()) android.R.style.Theme_Material_Dialog_Alert else android.R.style.Theme_Material_Light_Dialog_Alert
+    LaunchedEffect(revision) { availableCategories = repository.categories() }
+    val pickerTheme = `in`.txnsense.app.ui.ledgerPickerTheme()
     var discard by remember { mutableStateOf(false) }
-    val leave = { if (!busy) { if (dirty) discard = true else onDone() }; Unit }
+    val leave = { if (!busy) { if (dirty) discard = true else onCancel() }; Unit }
     BackHandler { leave() }
-    Column(Modifier.fillMaxWidth().imePadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (compact) "Categorize transaction" else if (existing == null) "Add transaction" else "Edit / confirm transaction", style = MaterialTheme.typography.titleLarge)
+    Column(Modifier.fillMaxWidth().heightIn(max=maxSheetHeight).navigationBarsPadding().imePadding().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 8.dp), verticalAlignment=Alignment.CenterVertically) {
+            Text(if (compact) "Category & purpose" else if (existing == null) "Add payment" else if(existing.reviewState=="NeedsReview") "Check this payment" else "Payment details",
+                style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            IconButton(onClick=leave, enabled=!busy, modifier=Modifier.semantics {contentDescription="Close transaction editor"}) { LedgerIcon("close") }
+        }
+      Column(Modifier.weight(1f,fill=false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (!sourcesReady) {
+            if (sourceLookup.failed) {
+                Text("Could not load payment sources. Retry before saving.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = sourceLookup.retry) { Text("Retry payment sources") }
+            }
+            else Text("Loading payment sources…", style = MaterialTheme.typography.bodySmall)
+        }
         if (compact && existing != null) {
-            Text("${`in`.txnsense.app.money(existing.amountMinor)} · ${existing.counterpartyLabel ?: friendly(existing.direction)}", style = MaterialTheme.typography.titleMedium)
+            val registeredSource = sources.firstOrNull { it.id == sourceId }
+            `in`.txnsense.app.ui.LedgerPaymentContext(existing.copy(category = category),
+                registeredSource?.let { it.nickname + if (it.active) "" else " (inactive)" })
             if (existing.reviewState == "NeedsReview") Text("Still needs review. Saving labels will not confirm the payment.", style = MaterialTheme.typography.bodySmall)
         }
         if (!compact) {
         Text(if (existing?.reviewState == "NeedsReview") "Check the details below. Unconfirmed transactions are excluded from totals." else "${friendly(existing?.sourceType ?: "Manual")} · Stored only on this device", style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(amount, { amount = it }, label = { Text("Amount (INR)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        LedgerTextInput(amount, { amount = it }, label = "Amount (INR)", amountStyle = true, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
         if (existing != null && amount.isBlank()) Text("Enter the transaction amount; it could not be identified.", color = MaterialTheme.colorScheme.error)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             listOf("Debit", "Credit", "Transfer").forEach { option ->
-                FilterChip(selected = direction == option, onClick = { direction = option }, label = { Text(friendly(option)) })
+                FilterChip(selected = direction == option, enabled = !busy && splitDraft.ready,
+                    modifier = Modifier.heightIn(min = 48.dp), onClick = {
+                    if (option == "Credit" && direction != "Credit") {
+                        // Clear only an explicit change to ordinary money in. Existing
+                        // credit self-transfers keep their classification when reselected.
+                        ownership = "Personal"; groupLabel = ""; personalShare = ""; repaid = ""
+                        repaymentExpected = true
+                        // Empty means remove stored shares; null means retain them.
+                        splitDraft.encoded = encodeShares(emptyList()); splitDraft.total = null
+                        if (type == "SelfTransfer") { type = "Other"; previousType = "Other" }
+                    }
+                    direction = option; error = null
+                }, label = { Text(if (type == "CardRepayment" && option != "Transfer") if (option == "Debit") "Bank payment" else "Card confirmation" else friendly(option)) })
             }
         }
         if (direction == "Unknown") Text("Choose money out, money in, or transfer.", color = MaterialTheme.colorScheme.error)
-        OutlinedTextField(label, { label = it.take(60) }, label = { Text("Label (optional)") }, supportingText = { Text("A short description, not personal or account details.") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        LedgerTextInput(label, { label = it.take(60); if (label.trim().length < 2) rememberCategory = false }, label = "Merchant or short label (optional)", singleLine = true, modifier = Modifier.fillMaxWidth())
+        LedgerTextInput(notes, { notes = it.take(200) }, label = "Description (optional)", enabled = !busy,
+            supportingText = { Text("${notes.length}/200 · A short note, such as dinner after the movie. Stored only on this device.", style = MaterialTheme.typography.bodySmall) },
+            modifier = Modifier.fillMaxWidth())
         }
-        Choice("Category", category, listOf("Other", "Food", "Travel", "Shopping", "Bills", "Health", "Education", "Entertainment", "Cash")) { category = it }
-        Text("Who was this payment for?", style = MaterialTheme.typography.labelLarge)
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Personal", "ForOther", "Group", "SelfTransfer").forEach { option ->
-                FilterChip(selected = ownership == option, onClick = {
-                    ownership = option
-                    type = if (option == "SelfTransfer") "SelfTransfer" else if (type == "SelfTransfer") "Other" else type
-                    if (option !in listOf("ForOther", "Group")) repaid = ""
-                    if (option != "Group") { groupLabel = ""; personalShare = "" }
-                }, label = { Text(friendly(option)) })
+        Choice("Category", category, availableCategories) { category = it }
+        TextButton(onClick = { addingCategory = true }) { Text("Add category") }
+        if (existing?.categoryNeedsReview == true) Text("Conflicting rules matched this payment. Choose its category; the payment's financial status is unchanged.", style = MaterialTheme.typography.bodySmall)
+        if (label.trim().length >= 2 && detailsExpanded) {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Checkbox(checked = rememberCategory, onCheckedChange = { rememberCategory = it })
+                Text("Remember this category for future payments", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            }
+            if (rememberCategory) {
+                Text("Exact merchant: ${label.trim()} → $category. Only the category is remembered, not who the payment was for.", style = MaterialTheme.typography.bodySmall)
+                if (sources.any { it.id == sourceId && it.active }) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = rememberForSource, onCheckedChange = { rememberForSource = it })
+                    Text("Only for ${sources.firstOrNull { it.id == sourceId }?.nickname}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
-        if (ownership == "Group") {
-            OutlinedTextField(groupLabel, { groupLabel = it.take(40) }, label = { Text("Group name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(personalShare, { personalShare = it }, label = { Text("Your share (INR)") }, supportingText = { Text("The rest is tracked as money others owe you.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        if (direction != "Credit") {
+        Text("Who was it for?", style = MaterialTheme.typography.labelMedium)
+        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            (if (type == "CardRepayment") listOf("Personal", "Family") else listOf("Personal", "Family", "Group", "ForOther", "SelfTransfer")).forEach { option ->
+                FilterChip(selected = ownership == option, modifier = Modifier.heightIn(min = 48.dp), onClick = {
+                    ownership = option
+                    if (existing == null && option != "Group") splitDraft.encoded = null
+                    type = if (option == "SelfTransfer") "SelfTransfer" else if (type == "SelfTransfer") "Other" else type
+                    if (option !in listOf("ForOther", "Group")) repaid = ""
+                    if (option !in listOf("Group", "ForOther")) groupLabel = ""
+                    if (option != "Group") personalShare = ""
+                }, label = { Text(if (option == "SelfTransfer") "Self transfer" else friendly(option)) })
+            }
         }
-        if (ownership == "ForOther" || ownership == "Group") {
-            OutlinedTextField(repaid, { repaid = it }, label = { Text("Already repaid (INR, optional)") }, supportingText = { Text("Update this when people repay you.") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
         }
-        if (compact) TextButton(onClick = { compact = false }) { Text("Edit all details") }
+        if (!compact && direction in listOf("Debit", "Credit") && ownership != "SelfTransfer" && type !in listOf("Reversal", "SelfTransfer")) {
+            val cardCredit = direction == "Credit" && (channel == "Card" || sources.any { it.id == sourceId && it.kind == "Credit card" })
+            if (cardCredit && type == "Unknown") Text("Is this a card bill payment, a refund, or another credit? Choose below before confirming.", style = MaterialTheme.typography.bodySmall)
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                if (ownership in listOf("Personal", "Family")) FilterChip(selected = type == "CardRepayment", onClick = {
+                    if (type == "CardRepayment") type = previousType else {
+                        if (type != "Refund") previousType = type
+                        type = "CardRepayment"
+                    }
+                }, label = { Text("Card bill payment") })
+                if (direction == "Credit") FilterChip(selected = type == "Refund", onClick = {
+                    if (type == "Refund") type = previousType else {
+                        if (type != "CardRepayment") previousType = type
+                        type = "Refund"
+                    }
+                }, label = { Text("Refund") })
+                if (cardCredit) FilterChip(selected = type == "Other", onClick = { type = "Other"; previousType = "Other" }, label = { Text("Other money in") })
+            }
+        }
+        if (!compact && type == "CardRepayment") Text("Pays your own card bill, not a new purchase or income. Excluded from spending and money-in/out totals.", style = MaterialTheme.typography.bodySmall)
+        if (!compact && type == "Refund") Text("Money returned for a previous payment, not new income. Refunds are shown separately in spending breakdowns.", style = MaterialTheme.typography.bodySmall)
+        if (direction == "Debit" && ownership in listOf("ForOther", "Group")) {
+            Text("Repayment expected?", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                FilterChip(selected = repaymentExpected, onClick = { repaymentExpected = true }, label = { Text("Yes") })
+                FilterChip(selected = !repaymentExpected, onClick = { repaymentExpected = false }, label = { Text("No · gift or treat") })
+            }
+            if (!repaymentExpected) Text("The full payment counts as your spending. No money is owed back.", style = MaterialTheme.typography.bodySmall)
+        }
+        if (direction != "Credit") Text(when {
+            !repaymentExpected && ownership in listOf("ForOther", "Group") -> "Gift or treat · full amount counts as your spending."
+            else -> when (ownership) {
+            "Group" -> "Only your share counts as your spending. The remainder is owed by others."
+            "ForOther" -> "This payment is tracked separately from your own spending."
+            "SelfTransfer" -> "Transfers are excluded from spending totals."
+            "Family" -> "Family payments count as your spending."
+            else -> "Full amount counts as your spending."
+        } }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (direction != "Credit" && ownership in listOf("Group", "ForOther")) {
+            LedgerTextInput(groupLabel, { groupLabel = it.take(40) }, label = if (ownership == "Group") "Group name" else "Local name (optional)",
+                supportingText = { Text("A local label only. No contacts are accessed or invited.") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        }
+        if (direction != "Credit" && ownership == "Group" && repaymentExpected) {
+            if (direction == "Debit") GroupSplitFormFields(repository, splitDraft, amount, personalShare, !busy,
+                onPersonalShare = { personalShare = it }, onError = { error = it }, onPresetApplied = { groupLabel = it })
+            else LedgerTextInput(personalShare, { personalShare = it }, label = "Your share (INR)", amountStyle = true, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        }
+        if (direction == "Debit" && repaymentExpected && ownership in listOf("ForOther", "Group")) {
+            Text(if (existing == null) "Save this expense, then record dated repayments from its details."
+                else "Record or edit repayments in transaction details. Existing repayment links must be removed before changing financial details or the split.",
+                style = MaterialTheme.typography.bodySmall)
+            if (existing != null && existing.repaidMinor > 0) Text("Already received: ${`in`.txnsense.app.money(existing.repaidMinor)}", style = MaterialTheme.typography.bodySmall)
+        }
+        TextButton(onClick = { if(compact) {compact=false;detailsExpanded=true} else detailsExpanded=!detailsExpanded },contentPadding=PaddingValues(0.dp)) { Text(if(detailsExpanded && !compact) "Fewer details" else "More details") }
         if (!compact) {
+        if (detailsExpanded) {
         val selectedDate = LocalDateTime.parse(date, formatter)
         TextButton(onClick = {
             android.app.DatePickerDialog(context, pickerTheme, { _, year, month, day ->
@@ -114,33 +234,32 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
         }
         if (sources.any { it.active && it.channel == channel } || sourceId != null) SourceChoice(sourceId, channel, sources) { sourceId = it }
         if (status == "Unknown") Choice("Payment status — please check", status, TransactionStatus.entries.map { it.name }) { status = it }
-        if (type == "Unknown") Choice("Transaction type — please choose", type, TransactionType.entries.map { it.name }) {
-            type = it
-            ownership = if (it == "SelfTransfer") "SelfTransfer" else if (ownership == "SelfTransfer") "Personal" else ownership
-        }
-        TextButton(onClick = { optional = !optional }) { Text(if (optional) "Fewer details" else "More details") }
+        TextButton(onClick = { optional = !optional }) { Text(if (optional) "Fewer details" else "Advanced details") }
         if (optional) {
-            if (type != "Unknown") Choice("Transaction type", type, TransactionType.entries.map { it.name }) {
+            Choice("Transaction type", type, TransactionType.entries.map { it.name }) {
                 type = it
                 ownership = if (it == "SelfTransfer") "SelfTransfer" else if (ownership == "SelfTransfer") "Personal" else ownership
             }
             if (status != "Unknown") Choice("Payment status", status, TransactionStatus.entries.map { it.name }) { status = it }
-            OutlinedTextField(hint, { hint = it }, label = { Text("Account last 4 digits (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(notes, { notes = it.take(200) }, label = { Text("Notes (optional)") }, modifier = Modifier.fillMaxWidth())
+            LedgerTextInput(hint, { hint = it }, label = "Account last 4 digits (optional)", singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("Use short labels and notes. Do not paste SMS, OTPs, personal contact names, UPI IDs or full account numbers. Text stays encrypted on this device.", style = MaterialTheme.typography.bodySmall)
+        }
         }
         }
       }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        splitDraft.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(bottom=18.dp),horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
-                if (!busy) {
+                if (!busy && sourcesReady && splitDraft.ready) {
                     if (compact && existing != null) {
                         busy = true
                         scope.launch {
                             try {
-                                repository.classify(existing.id, category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid)
+                                repository.classify(existing.id, category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid, repaymentExpected,
+                                    if (rememberCategory) RememberCategoryRule(label, sourceId.takeIf { rememberForSource }) else null,
+                                    groupShares = splitDraft.shares, expectedUpdatedAt = existing.updatedAt)
                                 onDone()
                             } catch (e: IllegalArgumentException) { error = e.message ?: "Check the fields." }
                             catch (_: Exception) { error = "Could not save. Check that the record still exists and retry." }
@@ -151,25 +270,32 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
                     val input = try {
                         val editedTimestamp = LocalDateTime.parse(date, formatter).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                         val timestamp = if (existing != null && date == initialDate) existing.effectiveTimestamp else editedTimestamp
+                        val chosenType = transactionTypeForSave(type, direction, channel, sources.any { it.id == sourceId && it.kind == "Credit card" })
                         ManualInput(amount, Direction.valueOf(direction), timestamp,
-                            TransactionType.valueOf(type), TransactionStatus.valueOf(status), Channel.valueOf(channel), label, notes, hint,
-                            category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid, sourceId).also { it.validate() }
+                            chosenType, TransactionStatus.valueOf(status), Channel.valueOf(channel), label, notes, hint,
+                            category, SpendingOwnership.valueOf(ownership), groupLabel, personalShare, repaid, sourceId, repaymentExpected,
+                            groupShares = splitDraft.shares).also { it.validate() }
                     } catch (e: IllegalArgumentException) { error = e.message ?: "Check the fields."; null }
                     catch (_: java.time.DateTimeException) { error = "Enter a valid date and time as yyyy-MM-dd HH:mm."; null }
                     if (input != null) { busy = true; scope.launch {
-                        try { repository.save(input, existing?.id, draftId); onDone() }
+                        try { repository.save(input, existing?.id, draftId,
+                            if (rememberCategory) RememberCategoryRule(label, sourceId.takeIf { rememberForSource }) else null,
+                            expectedUpdatedAt = existing?.updatedAt); onDone() }
+                        catch (e: IllegalArgumentException) { error = e.message ?: "Check the fields." }
                         catch (_: Exception) { error = "Could not save. Check that the record still exists and retry." }
                         finally { busy = false }
                     } }
                 }
-            }, enabled = !busy, modifier = Modifier.weight(1f)) { Text(if (busy) "Saving…" else "Save transaction") }
-            OutlinedButton(onClick = leave, enabled = !busy) { Text("Cancel") }
+            }, enabled = !busy && sourcesReady && splitDraft.ready, modifier = Modifier.weight(1f).heightIn(min=50.dp),shape=RoundedCornerShape(13.dp)) { Text(if (busy) "Saving…" else if(compact) "Save changes" else if(existing==null) "Add payment" else if(existing.reviewState=="NeedsReview") "Confirm payment" else "Save changes") }
         }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Leave without saving?") },
         text = { Text("Your changes have not been saved.") },
-        confirmButton = { TextButton(onClick = { discard = false; onDone() }) { Text("Discard changes") } },
+        confirmButton = { TextButton(onClick = { discard = false; onCancel() }) { Text("Discard changes") } },
         dismissButton = { TextButton(onClick = { discard = false }) { Text("Keep editing") } })
+    if (addingCategory) AddCategoryDialog(repository,
+        onCreated = { created -> category = created; availableCategories = availableCategories + created; addingCategory = false },
+        onDismiss = { addingCategory = false })
 }
 
 /** Read-only "where this came from" panel plus an on-demand live lookup of the source SMS. */
@@ -238,21 +364,38 @@ fun TransactionForm(repository: TransactionRepository, existing: TransactionEnti
     var expanded by remember { mutableStateOf(false) }
     val selectedSource = sources.firstOrNull { it.id == value }
     val selected = selectedSource?.let { "${it.nickname}${if (it.active) "" else " (inactive)"}" } ?: "Not set"
-    Box {
-        OutlinedButton(onClick = { expanded = true }) { Text("Payment source: $selected") }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+        Text("Payment source", style = MaterialTheme.typography.labelMedium)
+        Box {
+        ChoiceButton(selected, onClick = { expanded = true })
         DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("Not set") }, onClick = { onChoose(null); expanded = false })
             sources.filter { it.active && it.channel == channel }.forEach { source -> DropdownMenuItem(text = { Text(source.nickname) }, onClick = { onChoose(source.id); expanded = false }) }
+        }
         }
     }
 }
 
 @Composable private fun Choice(label: String, value: String, options: List<String>, onChoose: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        OutlinedButton(onClick = { expanded = true }) { Text("$label: ${friendly(value)}") }
+    Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(9.dp)) {
+        Text(label,style=MaterialTheme.typography.labelMedium)
+        Box {
+        ChoiceButton(friendly(value), onClick = { expanded = true })
         DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
             options.forEach { option -> DropdownMenuItem(text = { Text(friendly(option)) }, onClick = { onChoose(option); expanded = false }) }
         }
+        }
+    }
+}
+
+@Composable private fun ChoiceButton(value: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 49.dp),
+        shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onSurface),
+        contentPadding = PaddingValues(12.dp)) {
+        Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        LedgerIcon("down", Modifier.size(16.dp))
     }
 }

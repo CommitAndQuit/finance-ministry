@@ -18,12 +18,12 @@ class ManualEntryUiTest {
             repository.preferences.edit().putBoolean("sms_disclosure", false).commit()
             rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             rule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
-            rule.onNodeWithText("Settings").performClick()
-            rule.onNodeWithText("SMS and past messages").performClick()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("SMS & notifications")
             rule.onNodeWithText("Enable SMS capture").assertExists()
-            rule.onNodeWithText("Back").performClick()
-            rule.onNodeWithText("Home").performClick()
-            rule.onNodeWithText("+ Add transaction").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Back to settings").performClick()
+            rule.onNodeWithContentDescription("Close settings").performClick()
+            rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
         } finally { repository.preferences.edit().putBoolean("sms_disclosure", previous).commit() }
     }
 
@@ -31,21 +31,36 @@ class ManualEntryUiTest {
         val repository = (rule.activity.application as TxnSenseApp).container.repository
         val before = runBlocking { repository.snapshot().rows.map { it.id }.toSet() }
         try {
-            rule.onNodeWithText("+ Add transaction").performClick()
-            rule.onNodeWithText("Amount (INR)").performTextInput("512.34")
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.onNodeWithContentDescription("Add transaction").performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("512.34")
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             try {
                 rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 51234L } } }
             } catch (failure: Throwable) {
                 throw AssertionError("Save did not finish. UI state: ${rule.onRoot().printToString()}", failure)
             }
-            rule.onNodeWithText("+ Add transaction").assertIsDisplayed()
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("₹512.34"))
-            rule.onNodeWithText("₹512.34").assertIsDisplayed()
+            rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
+            // Overview deliberately shows only four recent records. Other test fixtures can
+            // be newer than this entry; verify the saved record in the complete ledger.
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            rule.waitUntil(15000) {
+                rule.onAllNodesWithText("Loading transactions…").fetchSemanticsNodes().isEmpty() &&
+                    rule.onAllNodesWithText("Totals").fetchSemanticsNodes().isNotEmpty()
+            }
+            val savedRow = hasText("₹512.34") and hasClickAction()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(savedRow)
+            rule.onNode(savedRow).assertIsDisplayed()
             val saved = runBlocking { repository.snapshot().rows.single { it.id !in before && it.amountMinor == 51234L } }
             assertEquals("Debit", saved.direction)
         } finally {
             runBlocking { repository.snapshot().rows.filter { it.id !in before }.forEach { repository.delete(it.id) } }
         }
+    }
+
+    @Test fun manual_form_keeps_date_source_and_notes_in_more_details() {
+        rule.onNodeWithContentDescription("Add transaction").performClick()
+        rule.onNodeWithText("More details").performScrollTo().assertIsDisplayed()
+        rule.onAllNodes(hasText("Date:", substring = true)).assertCountEquals(0)
     }
 }

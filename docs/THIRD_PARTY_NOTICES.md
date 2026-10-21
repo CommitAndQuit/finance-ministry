@@ -29,3 +29,15 @@ The dependency catalog pins direct versions; inspect the complete resolved graph
 When adding or upgrading a dependency, review its license and native/transitive
 components and update these notices before distributing a new APK. This list does
 not change or replace the upstream license terms.
+
+## SMS format research acknowledgements
+
+The [Indian Payment SMS Corpus](https://github.com/skyaara/indian-payment-sms-dataset),
+by SplitEasy contributors, was used locally for synthetic parser evaluation and
+format research at revision `ef81c756ddd8c8f5ba09f1b00820700108f9c84c`.
+Its authored synthetic dataset and documentation use
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); consult its `SOURCES.md`
+for provenance and upstream credits. Regression messages use invented values and
+identifiers, and the parser implementation is independently written. No upstream
+parser implementation or full corpus is bundled in the app. This synthetic
+evaluation is not real-inbox accuracy or bank certification.

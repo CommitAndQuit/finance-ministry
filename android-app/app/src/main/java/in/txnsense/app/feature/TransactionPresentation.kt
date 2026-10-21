@@ -1,5 +1,24 @@
 package `in`.txnsense.app.feature
 
+import `in`.txnsense.app.data.TransactionEntity
+import `in`.txnsense.app.data.PersonRepaymentBalance
+
+/** A legacy group is a balance, not an invented individual person. */
+fun owedBalanceCountLabel(balances: List<PersonRepaymentBalance>): String {
+    val outstanding = balances.filter { it.outstanding.signum() > 0 }
+    val onlyPeople = outstanding.all { balance -> balance.expenses.all {
+        it.memberId != null || it.expense.ownership == "ForOther" && balance.name != "Unassigned"
+    } }
+    val count = outstanding.size
+    val noun = if (onlyPeople) if (count == 1) "person" else "people" else if (count == 1) "balance" else "balances"
+    return "$count $noun"
+}
+
+fun transactionFlowLabel(row: TransactionEntity): String =
+    if (row.transactionType == "CardRepayment") {
+        if (row.direction == "Credit") "Card confirmation" else "Card bill payment"
+    } else friendly(row.direction)
+
 /** Display copy only. Persisted enum values remain unchanged for existing ledgers. */
 fun friendly(value: String): String = when (value) {
     "Debit" -> "Money out"
@@ -11,6 +30,7 @@ fun friendly(value: String): String = when (value) {
     "ForOther" -> "For someone else"
     "SelfTransfer" -> "Self transfer"
     "MerchantPayment" -> "Purchase"
+    "CardRepayment" -> "Card bill payment"
     "Unknown" -> "Not identified"
     "SMS" -> "From SMS"
     "Manual" -> "Added manually"

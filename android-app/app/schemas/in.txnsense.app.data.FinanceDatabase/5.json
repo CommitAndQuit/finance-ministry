@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 5,
-    "identityHash": "062d88cef210968397f9b8ee8fc9fb4d",
+    "identityHash": "cde3beaed6b7e7ab14641613d7663d21",
     "entities": [
       {
         "tableName": "transactions",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceFingerprint` BLOB, `sourceType` TEXT NOT NULL, `sourceTimestamp` INTEGER NOT NULL, `effectiveTimestamp` INTEGER NOT NULL, `amountMinor` INTEGER, `currency` TEXT, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `counterpartyLabel` TEXT, `maskedAccountHint` TEXT, `userNotes` TEXT, `confidence` INTEGER NOT NULL, `reviewState` TEXT NOT NULL, `parserVersion` INTEGER NOT NULL, `isUserCorrected` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `referenceHash` BLOB, `linkedOriginalId` TEXT, `importBatchId` TEXT, `category` TEXT NOT NULL, `ownership` TEXT NOT NULL, `groupLabel` TEXT, `personalShareMinor` INTEGER, `repaidMinor` INTEGER NOT NULL, `paymentSourceId` TEXT, `bankName` TEXT, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceFingerprint` BLOB, `sourceType` TEXT NOT NULL, `sourceTimestamp` INTEGER NOT NULL, `effectiveTimestamp` INTEGER NOT NULL, `amountMinor` INTEGER, `currency` TEXT, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `counterpartyLabel` TEXT, `maskedAccountHint` TEXT, `userNotes` TEXT, `confidence` INTEGER NOT NULL, `reviewState` TEXT NOT NULL, `parserVersion` INTEGER NOT NULL, `isUserCorrected` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `referenceHash` BLOB, `linkedOriginalId` TEXT, `importBatchId` TEXT, `category` TEXT NOT NULL, `ownership` TEXT NOT NULL, `groupLabel` TEXT, `personalShareMinor` INTEGER, `repaidMinor` INTEGER NOT NULL, `paymentSourceId` TEXT, `repaymentExpected` INTEGER NOT NULL DEFAULT 1, `duplicateOfId` TEXT, `categoryNeedsReview` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -171,9 +171,23 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "bankName",
-            "columnName": "bankName",
+            "fieldPath": "repaymentExpected",
+            "columnName": "repaymentExpected",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "duplicateOfId",
+            "columnName": "duplicateOfId",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "categoryNeedsReview",
+            "columnName": "categoryNeedsReview",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -363,11 +377,184 @@
             "id"
           ]
         }
+      },
+      {
+        "tableName": "repayments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `expenseId` TEXT NOT NULL, `incomingId` TEXT, `amountMinor` INTEGER NOT NULL, `receivedAt` INTEGER, `payer` TEXT NOT NULL, `method` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`expenseId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`incomingId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expenseId",
+            "columnName": "expenseId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "incomingId",
+            "columnName": "incomingId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "amountMinor",
+            "columnName": "amountMinor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "receivedAt",
+            "columnName": "receivedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "payer",
+            "columnName": "payer",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "method",
+            "columnName": "method",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_repayments_expenseId",
+            "unique": false,
+            "columnNames": [
+              "expenseId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_repayments_expenseId` ON `${TABLE_NAME}` (`expenseId`)"
+          },
+          {
+            "name": "index_repayments_incomingId",
+            "unique": false,
+            "columnNames": [
+              "incomingId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_repayments_incomingId` ON `${TABLE_NAME}` (`incomingId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "transactions",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "expenseId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "transactions",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "incomingId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "category_rules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `merchant` TEXT NOT NULL, `sourceId` TEXT, `category` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "merchant",
+            "columnName": "merchant",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "ledger_metadata",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
+          {
+            "fieldPath": "key",
+            "columnName": "key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '062d88cef210968397f9b8ee8fc9fb4d')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'cde3beaed6b7e7ab14641613d7663d21')"
     ]
   }
 }

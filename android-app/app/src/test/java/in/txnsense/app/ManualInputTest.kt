@@ -7,9 +7,42 @@ import org.junit.Test
 
 class ManualInputTest {
     private fun input(amount: String) = ManualInput(amount, Direction.Debit, 1700000000000, TransactionType.Other)
+    @Test fun card_bills_cannot_have_a_group_split_or_transfer_direction() {
+        val bill = input("1000").copy(type = TransactionType.CardRepayment)
+        bill.validate()
+        bill.copy(direction = Direction.Credit).validate()
+        assertThrows(IllegalArgumentException::class.java) { bill.copy(direction = Direction.Transfer).validate() }
+        assertThrows(IllegalArgumentException::class.java) { bill.copy(ownership = SpendingOwnership.ForOther).validate() }
+        assertThrows(IllegalArgumentException::class.java) { bill.copy(ownership = SpendingOwnership.Group, groupLabel = "Group").validate() }
+    }
+    @Test fun gifts_count_fully_without_creating_a_repayment_balance() {
+        val gift = input("3000").copy(ownership = SpendingOwnership.Group, groupLabel = "Birthday",
+            personalShare = "1000", repaymentExpected = false)
+        gift.validate()
+        assertEquals(300000L, gift.personalShareMinor())
+        assertEquals(0L, gift.repaidMinor())
+        assertThrows(IllegalArgumentException::class.java) { gift.copy(repaid = "500").validate() }
+        val treat = gift.copy(ownership = SpendingOwnership.ForOther, groupLabel = "")
+        treat.validate()
+        assertEquals(300000L, treat.personalShareMinor())
+    }
+    @Test fun family_bears_the_full_cost_without_repayment_tracking() {
+        val family = input("2000").copy(ownership = SpendingOwnership.valueOf("Family"),
+            personalShare = "100", repaid = "500")
+        family.validate()
+        assertEquals(200000L, family.personalShareMinor())
+        assertEquals(0L, family.repaidMinor())
+    }
     @Test fun exact_minor_units() { assertEquals(25050L, input("250.50").amountMinor()); input("1").validate() }
+    @Test fun fractional_amounts_without_a_leading_zero_keep_exact_paise() {
+        listOf(".80" to 80L, ".8" to 80L, ".01" to 1L, "0.80" to 80L).forEach { (text, paise) ->
+            input(text).validate()
+            assertEquals(paise, input(text).amountMinor())
+        }
+    }
     @Test fun rejects_invalid_amounts() {
-        listOf("", "-1", "0", "1.234", "NaN", "92233720368547759", "1e4", "1,000").forEach {
+        listOf("", "-1", "0", "1.234", "NaN", "92233720368547759", "1e4", "1,000",
+            ".", ".0", ".00", ".001", "-.80", ".8e1", "1.", ".80.1").forEach {
             assertThrows(IllegalArgumentException::class.java) { input(it).validate() }
         }
     }

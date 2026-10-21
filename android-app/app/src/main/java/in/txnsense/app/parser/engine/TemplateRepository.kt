@@ -13,7 +13,7 @@ private const val DATE = """(?:\d{4}-\d{2}-\d{2}|\d{1,2}[-/](?:\d{1,2}|[a-z]{3})
 private const val FOREIGN = """\b(?:usd|eur|gbp|aed|sgd|aud|cad|jpy|chf|sar|hkd|cny)\b"""
 
 /** Optional "… account XX1234" tail on otherwise bare movement lines. */
-private const val ACCT_TAIL = """(?:\s+(?:a/c|acc(?:ount|t)?)\s+[x*•]*(?<account>\d{4})(?!\d))?"""
+private const val ACCT_TAIL = """(?:\s+(?:a/c|acc(?:ount|t)?\.?)\s+[x*•]*(?<account>\d{4})(?![a-zA-Z0-9]))?"""
 
 // Card-alert building blocks. Three amount phrasings × three merchant/date tails; each combination
 // is its own template so every pattern can use the same `amount`/`account`/`merchant` group names.
@@ -701,7 +701,7 @@ object TemplateRepository {
         ),
         ParsingTemplate(
             templateId = "acct_debit_masked",
-            regexPattern = """^$MONEY\s+debited from\s+(?:a/c|acc(?:ount|t)?)\s+[x*•]+(?<account>\d{4})(?!\d)""",
+            regexPattern = """^$MONEY\s+debited from\s+(?:a/c|acc(?:ount|t)?\.?)\s+[x*•]+(?<account>\d{4})(?![a-zA-Z0-9])""",
             direction = Direction.Debit,
             status = TransactionStatus.Successful,
             channel = Channel.BankTransfer,

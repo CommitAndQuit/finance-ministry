@@ -1,54 +1,150 @@
 package `in`.txnsense.app
 
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.semantics.SemanticsActions
 import org.junit.Rule
 import org.junit.Test
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 
 class LedgerUxTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
 
+    @Test fun bottom_navigation_separates_overview_transactions_and_review() {
+        rule.onNodeWithContentDescription("Open home").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Open activity").assertIsDisplayed().performClick()
+        rule.onNodeWithText("Select").assertDoesNotExist()
+        rule.onNodeWithText("Filters").assertIsDisplayed()
+        rule.onNodeWithText("Search transactions").assertDoesNotExist()
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Totals").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Totals").performClick()
+        rule.onNodeWithText("Matching totals").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Close matching totals").performClick()
+        rule.onNodeWithContentDescription("Open review tab").assertIsDisplayed().performClick()
+        rule.onNode(hasText("Review") and !hasClickAction()).assertIsDisplayed()
+    }
+
+    @Test fun compact_add_action_is_accessible_and_opens_manual_entry() {
+        if (rule.onAllNodesWithText("Skip for now").fetchSemanticsNodes().isNotEmpty()) {
+            rule.onNodeWithText("Skip for now").performClick()
+        }
+        rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed().performClick()
+        rule.onNode(editableLedgerField("Amount (INR)")).assertIsDisplayed()
+        rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
+        rule.onNodeWithText("More details").performScrollTo().assertIsDisplayed().performClick()
+        rule.onNode(publicEditorSaveButton()).assertIsDisplayed()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
+    }
+
+    @Test fun personalization_updates_the_home_greeting() {
+        val repository = (rule.activity.application as TxnSenseApp).container.repository
+        val original = repository.preferences.getString("preferred_name", "").orEmpty()
+        try {
+            repository.preferences.edit().putString("preferred_name", "").commit()
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("Personalization")
+            rule.onNodeWithText("Preferred name").performTextInput("Asha")
+            rule.onNodeWithText("Save name").performClick()
+            rule.onNodeWithContentDescription("Close settings").performClick()
+            rule.onNodeWithText("Hi, Asha").assertIsDisplayed()
+        } finally { repository.preferences.edit().putString("preferred_name", original).commit() }
+    }
+
+    private fun openFilters(advanced: Boolean = true) {
+        rule.onNodeWithContentDescription("Open activity").performClick()
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Filter transactions"))
+        rule.onNodeWithContentDescription("Filter transactions").assertIsDisplayed().performClick()
+        rule.onNodeWithText("Filter activity").assertIsDisplayed()
+        if (advanced) rule.openAdvancedFilters()
+    }
+
+    @Test fun category_filters_support_multiple_choices_reopening_and_clearing() {
+        val repository = (rule.activity.application as TxnSenseApp).container.repository
+        val ids = runBlocking {
+            listOf("Bills", "Flat expenses", "Food").map { category ->
+                repository.save(`in`.txnsense.app.data.ManualInput("10", `in`.txnsense.app.core.model.Direction.Debit,
+                    System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other,
+                    category = category, label = "Filter fixture $category"))
+            }
+        }
+        try {
+            openFilters(advanced = false)
+            rule.openFilterCategories()
+            rule.onNode(hasText("Bills") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            rule.onNode(hasText("Flat expenses") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Filter fixture Bills").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Filter fixture Bills"))
+            rule.onNodeWithText("Filter fixture Bills").assertIsDisplayed()
+            rule.onNodeWithText("Filter fixture Food").assertDoesNotExist()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Filter transactions"))
+            openFilters(advanced = false)
+            rule.openFilterCategories()
+            rule.onNode(hasText("Bills") and hasAnyAncestor(isDialog())).performScrollTo().assertIsSelected()
+            rule.onNode(hasText("Flat expenses") and hasAnyAncestor(isDialog())).performScrollTo().assertIsSelected()
+            rule.onNode(hasText("Bills") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) {
+                rule.onAllNodesWithText("Filter fixture Flat expenses").fetchSemanticsNodes().isNotEmpty() &&
+                    rule.onAllNodesWithText("Filter fixture Bills").fetchSemanticsNodes().isEmpty()
+            }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Filter fixture Flat expenses"))
+            rule.onNodeWithText("Filter fixture Bills").assertDoesNotExist()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Clear transaction filters"))
+            rule.onNodeWithContentDescription("Clear transaction filters").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Filter fixture Food").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Filter fixture Food"))
+            rule.onNodeWithText("Filter fixture Food").assertIsDisplayed()
+        } finally { runBlocking { ids.forEach { repository.delete(it) } } }
+    }
+
     @Test fun monthly_cash_flow_is_visible_and_totals_help_opens_from_info_icon() {
-        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out · month").fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Money out · month").assertIsDisplayed()
-        rule.onNodeWithText("Money in · month").assertIsDisplayed()
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Money out").assertIsDisplayed()
+        rule.onNodeWithText("Money in").assertIsDisplayed()
         rule.onNodeWithText("How totals work").assertDoesNotExist()
         rule.onNodeWithContentDescription("How totals work").performClick()
-        rule.onNodeWithText("How totals work").assertIsDisplayed()
+        rule.onNodeWithText("Your month, explained").assertIsDisplayed()
         rule.onNodeWithText("Got it").performClick()
-        rule.onNodeWithText("How totals work").assertDoesNotExist()
+        rule.onNodeWithText("Your month, explained").assertDoesNotExist()
+    }
+
+    @Test fun overview_uses_the_monthly_summary_hierarchy() {
+        rule.waitUntil(15000) { rule.onAllNodesWithText("Money out").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText(java.time.YearMonth.now().format(java.time.format.DateTimeFormatter.ofPattern("MMMM uuuu"))).assertIsDisplayed()
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Still owed to you"))
+        rule.onNodeWithText("Still owed to you").assertIsDisplayed()
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Open repayments"))
+        rule.onNode(hasContentDescription("Open repayments") and hasText("from this month", substring = true)).assertIsDisplayed()
     }
 
     @Test fun settings_are_separate_and_return_to_home() {
         rule.onNodeWithText("Erase all local data").assertDoesNotExist()
-        rule.onNodeWithText("Settings").performClick()
-        rule.onNodeWithText("SMS and past messages").performClick()
+        rule.onNodeWithContentDescription("Settings").performClick()
+        rule.openSettingsTool("SMS & notifications")
         rule.onNodeWithText("Recording notifications").assertExists()
-        rule.onNodeWithText("Back").performClick()
-        rule.onNodeWithText("Data and privacy").performClick()
+        rule.onNodeWithContentDescription("Back to settings").performClick()
+        rule.openSettingsTool("Data and privacy")
         rule.onNodeWithText("Erase all local data").performScrollTo().assertExists()
-        rule.onNodeWithText("Back").performClick()
-        rule.onNodeWithText("Home").performClick()
-        rule.onNodeWithText("+ Add transaction").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Back to settings").performClick()
+        rule.onNodeWithContentDescription("Close settings").performClick()
+        rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
     }
 
     @Test fun repeating_active_filter_does_not_remove_saved_history() {
         val repository = (rule.activity.application as TxnSenseApp).container.repository
         val id = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("71.23", `in`.txnsense.app.core.model.Direction.Debit, System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other)) }
         try {
-            rule.onNodeWithText("Filters").performClick()
-            rule.onNodeWithText("Added manually").performClick()
-            rule.onNodeWithText("Apply").performClick()
-            rule.waitUntil(15000) {
-                rule.onAllNodesWithText("Your spending").fetchSemanticsNodes().isNotEmpty() &&
-                    rule.onAllNodesWithText("Loading transactions…").fetchSemanticsNodes().isEmpty()
-            }
-            rule.onNodeWithText("Added manually").performClick()
-            rule.onNodeWithText("Apply").performClick()
+            openFilters()
+            rule.onNode(hasText("Added manually") and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Added manually").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Added manually"))
+            rule.onNodeWithText("Added manually").assertIsDisplayed().performClick()
+            rule.onNodeWithText("Show transactions").performClick()
             val transactionRow = hasText("₹71.23") and hasClickAction()
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(transactionRow)
             rule.onNode(transactionRow).assertIsDisplayed()
@@ -61,35 +157,90 @@ class LedgerUxTest {
         val debit = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("31.11", `in`.txnsense.app.core.model.Direction.Debit, System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other, label = debitLabel)) }
         val credit = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("42.22", `in`.txnsense.app.core.model.Direction.Credit, System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other, label = creditLabel)) }
         try {
-            rule.onNodeWithText("Filters").performClick()
-            rule.onAllNodesWithText("Money out")[1].performClick()
-            rule.onNodeWithText("Apply").performClick()
-            rule.waitUntil(15000) { rule.onAllNodesWithText(debitLabel).fetchSemanticsNodes().isNotEmpty() }
+            openFilters()
+            rule.onNode(hasText("Money out") and hasAnyAncestor(isDialog())).performClick()
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(debitLabel))
             rule.onNodeWithText(debitLabel).assertIsDisplayed()
             rule.onNodeWithText(creditLabel).assertDoesNotExist()
-            rule.onNodeWithText("Filters").performClick()
-            rule.onNodeWithText("Money in").performClick()
-            rule.onNodeWithText("Apply").performClick()
-            rule.waitUntil(15000) { rule.onAllNodesWithText(creditLabel).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Filter transactions"))
+            openFilters()
+            rule.onNode(hasText("Money in") and hasAnyAncestor(isDialog())).performClick()
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(creditLabel))
             rule.onNodeWithText(creditLabel).assertIsDisplayed()
             rule.onNodeWithText(debitLabel).assertDoesNotExist()
         } finally { runBlocking { repository.delete(debit); repository.delete(credit) } }
     }
 
+    @Test fun registered_payment_source_filters_transactions_from_the_existing_dialog() {
+        val repository = (rule.activity.application as TxnSenseApp).container.repository
+        val suffix = java.util.UUID.randomUUID().toString().filter(Char::isLetter).take(8)
+        val sourceName = "Filter UPI $suffix"
+        var source: `in`.txnsense.app.data.PaymentSourceEntity? = null
+        var matching: String? = null
+        var other: String? = null
+        try {
+            val createdSource = runBlocking { repository.addPaymentSource(sourceName, "UPI", `in`.txnsense.app.core.model.Channel.UPI, "Test bank", "7111") }
+            source = createdSource
+            matching = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("81.25", `in`.txnsense.app.core.model.Direction.Debit,
+                System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other,
+                channel = `in`.txnsense.app.core.model.Channel.UPI, label = "Source filter match $suffix", paymentSourceId = createdSource.id)) }
+            other = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("82.25", `in`.txnsense.app.core.model.Direction.Debit,
+                System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other, label = "Source filter other $suffix")) }
+            openFilters()
+            rule.onNode(hasText(sourceName) and hasAnyAncestor(isDialog())).performScrollTo().performClick()
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("1 transaction").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Source filter match $suffix"))
+            rule.onNodeWithText("Source filter match $suffix").assertIsDisplayed()
+            rule.onNodeWithText("Source filter other $suffix").assertDoesNotExist()
+        } finally {
+            runBlocking {
+                matching?.let { repository.delete(it) }
+                other?.let { repository.delete(it) }
+                source?.let { repository.deletePaymentSource(it.id) }
+            }
+        }
+    }
+
+    @Test fun search_shows_only_matching_rows_and_its_own_result_scope() {
+        val repository = (rule.activity.application as TxnSenseApp).container.repository
+        val debitLabel = "Needle debit"; val creditLabel = "Needle credit"; val otherLabel = "Haystack payment"
+        val debit = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("12.34", `in`.txnsense.app.core.model.Direction.Debit, System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other, label = debitLabel)) }
+        val credit = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("56.78", `in`.txnsense.app.core.model.Direction.Credit, System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other, label = creditLabel)) }
+        val other = runBlocking { repository.save(`in`.txnsense.app.data.ManualInput("9.99", `in`.txnsense.app.core.model.Direction.Debit, System.currentTimeMillis(), `in`.txnsense.app.core.model.TransactionType.Other, label = otherLabel)) }
+        try {
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            rule.onNodeWithContentDescription("Filter transactions").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Search transactions").performScrollTo().performTextInput("Needle")
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("2 transactions").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(debitLabel))
+            rule.onNodeWithText(debitLabel).assertIsDisplayed()
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(creditLabel))
+            rule.onNodeWithText(creditLabel).assertIsDisplayed()
+            rule.onNodeWithText(otherLabel).assertDoesNotExist()
+        } finally { runBlocking { listOf(debit, credit, other).forEach { repository.delete(it) } } }
+    }
+
     @Test fun cancel_changed_form_keeps_draft_until_discard_confirmed() {
-        rule.onNodeWithText("+ Add transaction").performClick()
-        rule.onNodeWithText("Amount (INR)").performTextInput("42.00")
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithContentDescription("Add transaction").performClick()
+        rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("42.00")
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
         rule.onNodeWithText("Keep editing").performClick()
         rule.onNodeWithText("42.00").assertExists()
-        rule.onNodeWithText("Cancel").performClick()
+        rule.onNodeWithContentDescription("Close transaction editor").performClick()
         rule.onNodeWithText("Discard changes").performClick()
-        rule.onNodeWithText("+ Add transaction").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Add transaction").assertIsDisplayed()
     }
 
     @Test fun review_reminder_navigation_does_not_discard_a_dirty_form() {
-        rule.onNodeWithText("+ Add transaction").performClick()
-        rule.onNodeWithText("Amount (INR)").performTextInput("43.21")
+        rule.onNodeWithContentDescription("Add transaction").performClick()
+        rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("43.21")
         rule.activityRule.scenario.onActivity { it.requestReview() }
         rule.onNodeWithText("Open review queue?").assertIsDisplayed()
         rule.onNodeWithText("Keep editing").performClick()
@@ -100,13 +251,14 @@ class LedgerUxTest {
         val repository = (rule.activity.application as TxnSenseApp).container.repository
         val before = runBlocking { repository.snapshot().rows.map { it.id }.toSet() }
         try {
-            rule.onNodeWithText("+ Add transaction").performClick()
-            rule.onNodeWithText("Amount (INR)").performTextInput("62.19")
-            rule.onNodeWithText("Money in").performClick()
+            rule.onNodeWithContentDescription("Add transaction").performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("62.19")
+            rule.onNode(hasText("Money in") and hasClickAction()).performClick()
             rule.activityRule.scenario.recreate()
             rule.onNodeWithText("62.19").assertExists()
-            rule.onNodeWithText("Money in").assertIsSelected()
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.onNode(hasText("Money in") and hasClickAction()).assertIsSelected()
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 6219L } } }
             val saved = runBlocking { repository.snapshot().rows.single { it.id !in before && it.amountMinor == 6219L } }
             assertEquals("Credit", saved.direction)
@@ -124,22 +276,22 @@ class LedgerUxTest {
             repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
             assertTrue(runBlocking { repository.ingest(`in`.txnsense.app.core.model.IncomingSms("SYNTHETIC", System.currentTimeMillis(), "Your account was debited via UPI.")) })
             rule.waitForIdle()
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Open review queue"))
-            rule.onNodeWithContentDescription("Open review queue").performClick()
-            val target = hasText("Amount unknown") and hasText("Money out")
+            rule.onNodeWithContentDescription("Open review tab").assertIsDisplayed().performClick()
+            val target = hasText("Amount unknown")
+            rule.waitUntil(15_000) { rule.onAllNodes(target).fetchSemanticsNodes().isNotEmpty() }
             try {
                 rule.onNode(hasScrollToNodeAction()).performScrollToNode(target)
             } catch (failure: Throwable) {
                 throw AssertionError("Review row did not appear. UI state: ${rule.onRoot().printToString()}", failure)
             }
-            rule.onNode(target).performClick()
-            rule.onNodeWithText("Check this transaction").assertExists()
-            rule.onNodeWithText("Edit / confirm").performClick()
-            rule.onNodeWithText("Money out").assertIsSelected()
-            rule.onNodeWithText("Amount (INR)").performTextInput("81.25")
-            rule.onNodeWithText("Transaction type — please choose: Not identified").performScrollTo().performClick()
-            rule.onNodeWithText("Other").performClick()
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.onNode(hasText("Check & confirm") and hasClickAction() and hasAnySibling(target))
+                .performScrollTo().performClick()
+            rule.onNodeWithText("Check this payment").assertExists()
+            rule.onNode(hasText("Money out") and hasClickAction()).assertIsSelected()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("81.25")
+            rule.onNodeWithText("Transaction type — please choose: Not identified").assertDoesNotExist()
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             rule.waitForIdle()
             try {
                 rule.waitUntil(15000) { runBlocking { repository.snapshot().rows.any { it.id !in before && it.amountMinor == 8125L && it.reviewState == "Confirmed" } } }
@@ -173,19 +325,19 @@ class LedgerUxTest {
             assertEquals(originalId, runBlocking { repository.get(reversalId!!)!!.linkedOriginalId })
 
             rule.waitForIdle()
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("All"))
-            rule.onNodeWithText("All").performClick()
-            val linkedCards = hasText("₹42.00") and hasText("Money out")
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            val linkedCards = hasText("₹42") and hasClickAction()
+            rule.waitUntil(15_000) { rule.onAllNodes(linkedCards).fetchSemanticsNodes().size == 2 }
             rule.onNode(hasScrollToNodeAction()).performScrollToNode(linkedCards)
-            rule.onAllNodes(linkedCards)[1].performClick()
+            rule.onAllNodes(linkedCards)[1].performTouchInput { longClick() }
             rule.onNodeWithText("Edit / confirm").performClick()
-            rule.onNodeWithText("Category: Other").performScrollTo().performClick()
+            rule.onNode(publicEditorChoice("Category", "Other")).performScrollTo().performClick()
             rule.onNodeWithText("Food").performClick()
-            rule.onNodeWithText("Transaction type — please choose: Not identified").performScrollTo().performClick()
-            rule.onNodeWithText("Other").performClick()
-            rule.onNodeWithText("Save transaction").performSemanticsAction(SemanticsActions.OnClick)
+            rule.onNodeWithText("Transaction type — please choose: Not identified").assertDoesNotExist()
+            rule.waitUntil(15_000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(publicEditorSaveButton()).performSemanticsAction(SemanticsActions.OnClick)
             try {
-                rule.waitUntil(15_000) { rule.onAllNodesWithText("+ Add transaction").fetchSemanticsNodes().isNotEmpty() }
+                rule.waitUntil(15_000) { rule.onAllNodesWithContentDescription("Add transaction").fetchSemanticsNodes().isNotEmpty() }
             } catch (failure: Throwable) {
                 throw AssertionError("Category edit did not leave the form. Stored=${runBlocking { repository.get(originalId!!) }} UI=${rule.onRoot().printToString()}", failure)
             }
@@ -218,13 +370,29 @@ class LedgerUxTest {
             assertEquals("NeedsReview", runBlocking { repository.get(transactionId!!)!!.reviewState })
             sourceId = runBlocking { repository.addPaymentSource(nickname, "Bank account", `in`.txnsense.app.core.model.Channel.UPI, "Test bank", "6789").id }
 
-            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("₹87.65"))
-            rule.onNodeWithText("₹87.65").performClick()
+            // Review cards lead to confirmation. Activity's pending rows also offer
+            // the source-only details path, which must leave this payment unconfirmed.
+            val beforeAssignment = runBlocking { repository.get(transactionId!!)!! }
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            val pendingRow = hasText("+₹87.65") and hasClickAction()
+            rule.waitUntil(15_000) {
+                rule.onAllNodes(pendingRow).fetchSemanticsNodes().isNotEmpty()
+            }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(pendingRow)
+            rule.onNode(pendingRow).performClick()
             rule.onNodeWithText("Choose payment source").performClick()
             rule.onNodeWithText("This only assigns a source. It won’t confirm or change the transaction.").assertExists()
             rule.onNodeWithText(nickname).performClick()
             rule.waitUntil(10_000) { runBlocking { repository.get(transactionId!!)!!.paymentSourceId } == sourceId }
-            assertEquals("NeedsReview", runBlocking { repository.get(transactionId!!)!!.reviewState })
+            val afterAssignment = runBlocking { repository.get(transactionId!!)!! }
+            assertEquals("NeedsReview", afterAssignment.reviewState)
+            // Room recreates byte arrays, so compare evidence by content rather than
+            // data-class reference equality while preserving every other field.
+            assertArrayEquals(beforeAssignment.sourceFingerprint, afterAssignment.sourceFingerprint)
+            assertArrayEquals(beforeAssignment.referenceHash, afterAssignment.referenceHash)
+            assertEquals(beforeAssignment.copy(paymentSourceId = sourceId, updatedAt = afterAssignment.updatedAt,
+                sourceFingerprint = null, referenceHash = null),
+                afterAssignment.copy(sourceFingerprint = null, referenceHash = null))
             rule.onNodeWithText("Check this transaction").assertExists()
             rule.onNodeWithText("Edit / confirm").assertExists()
         } finally {

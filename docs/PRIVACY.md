@@ -1,5 +1,13 @@
 # Privacy and data handling
 
+Updated 20 October 2026. TxnSense is an independent app
+maintained by hk121902-stack and CommitAndQuit, not a government service or a bank. Support is
+available at [financeministrysupport@gmail.com](mailto:financeministrysupport@gmail.com);
+share synthetic examples only. Use the private reporting route in SECURITY.md
+for vulnerabilities. The app includes offline-readable privacy information under
+Settings → Data and privacy, alongside a link to the
+[public privacy policy](https://hk121902-stack.github.io/finance-ministry/privacy.html).
+
 TxnSense processes incoming SMS on the Android device to create a local
 transaction ledger. There is no sign-up or app backend.
 
@@ -39,6 +47,13 @@ columns. No raw-message debug logging or upload feature is included. Input filte
 cannot prove arbitrary manually entered text is non-sensitive; do not paste messages,
 contact names, full account numbers, UPI IDs or OTPs into labels or notes.
 
+The local group-split feature stores optional reusable participant
+nicknames, stable local IDs, individual shares and settlement allocations in the
+encrypted ledger. Use nicknames, not contact details. It never reads contacts,
+invites people or syncs balances. Encrypted backups include these records; CSV
+schema 3 adds participant names, shares, received amounts and unpaid amounts.
+Those CSV fields are readable by anyone who can access the exported file.
+
 ## Learning new message formats
 
 From alpha.11, an optional setting lets the app work out its own parsing rules for bank
@@ -71,14 +86,27 @@ This is configuration and emulator evidence, not a guarantee about every OEM's b
 
 ## Notifications and deletion
 
-Notifications contain normalized transaction details, not the source SMS. Private
+Notifications contain normalized transaction details, not the source SMS. Optional
+budget and recurring-payment notifications contain only the configured category,
+reminder name and normalized amount. A reminder never initiates a payment or records
+a transaction. Private
 lock-screen visibility is requested; review your device's notification settings.
 Android's own Messages app can independently show the original SMS.
 
 Deleting a transaction also removes its correction history. Erase all removes the
 database, keys and settings and pauses capture. Uninstalling removes the local ledger.
-There is no restore, export or recovery service in this alpha. Database key errors
-preserve existing files rather than silently replacing the ledger.
+The app can create a user-chosen password-encrypted backup through Android's file
+picker and can restore that file after validation and a preview. The password and
+file are not uploaded or recoverable by the app. A CSV export is a readable report,
+not a complete restore backup, and is unencrypted once written to the location the
+user chooses. Restore replaces the local ledger atomically and pauses SMS capture and
+reminders for explicit reconfirmation. Database key or restore errors preserve the
+existing ledger rather than silently replacing it.
+
+The chosen file provider may sync exported files under its own policies. Erasing
+or uninstalling the app does not delete files you exported. CSV schema 2 includes
+status, transaction type, exclusion reasons and dashboard contribution fields;
+it remains an unencrypted report, not a restore backup.
 
 ## Debug alpha
 
@@ -86,6 +114,19 @@ Official alpha downloads are debuggable. Someone with an authorized debugging
 connection can inspect the app; use sample data and a test device. No production
 security certification or regulatory approval is claimed.
 
-GitHub handles repository visits, issues and downloads under its own policies. Only
+## Support email
+
+Contact **financeministrysupport@gmail.com** for bugs or feature requests through
+Settings → Help & feedback. This opens your email app with the app version and
+a blank report template. You review and send the email yourself. The app does not
+attach transactions, SMS, logs, backups or screenshots. If no email app is available,
+you can copy the support address and use another email service. Your email provider
+handles the information you choose to send under its own policies. Remove private
+details from any screenshots or examples you add.
+
+GitHub Pages hosts the public policy. GitHub handles visits to that page, the
+repository, issues and downloads under its
+[privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+Hosting the policy does not upload the app's ledger or give the app Internet access. Only
 share synthetic examples when reporting a bug. See [Security](../SECURITY.md) for
 private vulnerability reports.

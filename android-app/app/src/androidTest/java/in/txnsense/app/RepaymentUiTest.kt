@@ -1,0 +1,71 @@
+package `in`.txnsense.app
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import `in`.txnsense.app.core.model.*
+import `in`.txnsense.app.data.*
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+
+class RepaymentUiTest {
+    @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test fun gift_toggle_counts_full_amount_without_creating_debt() {
+        val r = (rule.activity.application as TxnSenseApp).container.repository
+        val before = runBlocking { r.snapshot().rows.map { it.id }.toSet() }
+        try {
+            rule.onNodeWithContentDescription("Add transaction").performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextInput("123.45")
+            androidx.test.espresso.Espresso.closeSoftKeyboard()
+            rule.onNode(hasText("Money out") and hasClickAction()).performClick()
+            rule.onNodeWithText("For someone else").performScrollTo().performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("No · gift or treat").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("No · gift or treat").performScrollTo().performClick()
+            rule.onNode(hasText("Add payment") and hasClickAction()).performClick()
+            rule.waitUntil(15000) { runBlocking { r.snapshot().rows.any { it.id !in before } } }
+            val saved = runBlocking { r.snapshot().rows.single { it.id !in before } }
+            assertFalse(saved.repaymentExpected)
+            assertEquals(12345L, RepaymentAccounting.personal(saved))
+            assertEquals(0L, RepaymentAccounting.owed(saved))
+        } finally { runBlocking { r.snapshot().rows.filter { it.id !in before }.forEach { r.delete(it.id) } } }
+    }
+
+    @Test fun cash_partial_repayment_is_recorded_from_monthly_owed_drilldown() {
+        val r = (rule.activity.application as TxnSenseApp).container.repository
+        val id = runBlocking { r.save(ManualInput("3000", Direction.Debit, System.currentTimeMillis(),
+            TransactionType.Other, label = "Repayment test dinner", ownership = SpendingOwnership.Group,
+            groupLabel = "Test flatmates", personalShare = "1000")) }
+        var receiptId: String? = null
+        try {
+            rule.waitUntil(15000) {rule.onAllNodesWithContentDescription("Open repayments").fetchSemanticsNodes().isNotEmpty()}
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Open repayments"))
+            rule.onNodeWithContentDescription("Open repayments").performClick()
+            rule.onNodeWithContentDescription("Open people").assertIsSelected()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Test flatmates").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Test flatmates").performClick()
+            rule.onNodeWithText("Expense & repayment history").performClick()
+            rule.onNodeWithText("Record repayment").performScrollTo().performClick()
+            rule.onNode(editableLedgerField("Repayment amount (INR)")).performTextInput("500")
+            rule.onNodeWithText("Received cash").performScrollTo().performClick()
+            rule.onNodeWithText("Record cash repayment").assertIsDisplayed().performClick()
+            rule.waitUntil(15000) { runBlocking { r.repaymentsFor(id).size == 1 } }
+            val repayment = runBlocking { r.repaymentsFor(id).single() }
+            receiptId = repayment.incomingId
+            assertEquals(50000L, repayment.amountMinor)
+            assertEquals(150000L, RepaymentAccounting.owed(runBlocking { r.get(id)!! }))
+            rule.onNodeWithText("Edit / confirm").assertIsDisplayed().performClick()
+            rule.onNode(editableLedgerField("Amount (INR)")).performTextReplacement("2999.00")
+            rule.activityRule.scenario.recreate()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Payment details").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("2999.00").assertExists()
+        } finally {
+            runBlocking {
+                r.repaymentsFor(id).forEach { r.removeRepayment(it.id) }
+                r.delete(id)
+                receiptId?.let { r.delete(it) }
+            }
+        }
+    }
+}

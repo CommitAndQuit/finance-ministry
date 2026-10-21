@@ -2,11 +2,13 @@
 
 An Android expense tracker that records transactions from incoming SMS and lets you add or correct them yourself.
 
-[Download alpha APKs](https://github.com/hk121902-stack/finance-ministry/releases) · [F-Droid Repo](#install-via-f-droid) · [Roadmap](docs/ROADMAP.md) · [Privacy](docs/PRIVACY.md) · [Report a bug](https://github.com/hk121902-stack/finance-ministry/issues/new/choose)
+[Download alpha APKs](https://github.com/hk121902-stack/finance-ministry/releases) · [F-Droid Repo](#install-via-f-droid) · [Roadmap](docs/ROADMAP.md) · [Privacy](docs/PRIVACY.md) · [Privacy Policy](https://hk121902-stack.github.io/finance-ministry/privacy.html) · [Report a bug](https://github.com/hk121902-stack/finance-ministry/issues/new/choose)
 
 **Status: early alpha.** The release channel is for installable **debug APKs** for testing. The app is being developed by one maintainer and is not ready for general use. Parsing can miss or misclassify transactions; check your records. Do not make this your only financial record.
 
-The current debug alpha is [v0.1.0-alpha.10](https://github.com/hk121902-stack/finance-ministry/releases/tag/v0.1.0-alpha.10).
+This source targets **v0.1.0-alpha.22**. Check
+[GitHub Releases](https://github.com/hk121902-stack/finance-ministry/releases)
+for published downloads; a local build is not an official APK.
 Download the debug APK from its assets. The release includes its SHA-256 checksum,
 signing-certificate details, and license notices. Physical-device testing is pending.
 
@@ -42,11 +44,61 @@ Or manually:
 
 ## What works today
 
+This guide describes the current source. The Home/Activity/People/Review refresh
+and saved group defaults shipped in alpha.21; alpha.22 adds the improvements below.
+Items under **Unreleased** in the changelog, including the smaller category catalog,
+fractional-amount fix and online policy link, are not in the existing alpha.22 download.
+
+- Explore a skippable, twelve-chapter **App tour** on first launch and once after
+  each update. Back/Next and optional More detail explain all current features;
+  replay it from Settings. Finishing or skipping stops repeat prompts for that
+  version. Optional setup never grants permissions or enables capture by itself.
 - Capture new financial SMS after you explicitly enable SMS access.
 - Save a normalized transaction first, then send an optional native notification with **View** and **Edit**.
 - Keep uncertain detections in **Review**, including transactions whose amount could not be safely extracted.
 - Add manual transactions with money-in/out choices, date/time pickers and optional details.
+- Add an optional **Description** in the full transaction editor. Existing notes
+  remain searchable and are included in encrypted backups.
+- Use **Settings → Help & feedback** to draft a bug report or feature request to
+  financeministrysupport@gmail.com. You review and send it yourself; no ledger,
+  messages, logs or attachments are automatically included. Copy the address if
+  no email app is installed.
 - Use separate Home and Settings screens, light/dark themes and unsaved-edit warnings.
+- Use **Home**, searchable and filterable **Activity**, individual balances in
+  **People**, and a separate all-dates **Review** queue. Select visible transactions to update their
+  category or compatible payment source with a preview and Undo.
+- Set an optional on-device home greeting and filter transactions by category, purpose,
+  money flow or origin. Filter-result totals use the same accounting rules as Home,
+  applied to the matching records; they never replace whole-month totals.
+- Add your own categories from the transaction form, or start with Grocery, Food,
+  Entertainment, Bills, Transport and Investment. Categories are local labels; they do not change money-in/out
+  direction or the spending calculations. Custom categories are included in encrypted backups.
+  Other remains the uncategorized fallback. Previously used categories (including
+  Income, Flat expenses and Travel) remain available; unused older suggestions no
+  longer crowd a fresh ledger. Personal, Family, Group, For someone else
+  and Self transfer are separate payment purposes, not competing categories.
+- Card bill payments settle an existing card balance, so they are excluded from
+  spending and money-in/out totals. Both the bank debit and issuer confirmation can
+  be retained. Use the transaction's "Mark as card bill payment" action to correct
+  an older record, or select it while adding/editing. The "Card credits to check"
+  filter surfaces unclassified card credits for the selected month, including
+  possible cashback: review each one, rather than marking all as bill payments.
+  Generic bank debits without explicit bill-payment wording still need correction.
+- Track partial repayments and gifts/treats without mixing gross group payments into
+  personal spending or silently settling any debt.
+  Open **People** or **Still owed to you**, choose a person/group and the expense,
+  then tap **Record repayment**. Search and link a recorded incoming
+  payment without adding money-in twice, or choose **Received cash**. Save stays
+  outside the scrolling form and previews the amount still owed. Transaction
+  details retain edit/unlink history; **Month breakdown** exposes the monthly metrics.
+- Review possible duplicate records and own-account transfers as suggestions, with
+  both original records retained and decisions reversible.
+- Use spending breakdowns, remembered category rules, selected-row batch cleanup,
+  optional category budgets and local monthly payment reminders.
+- Create a password-encrypted portable backup, preview and atomically restore it, or
+  export a readable CSV report. The password cannot be recovered by the app.
+- Add a privacy-first home-screen widget: quick add is amount-free by default; the
+  optional monthly summary requires explicit consent and hides while locked.
 - Edit records, keep correction history, delete individual records, or erase all local data.
 - Browse history in 100-record pages, filter manual/review/edited entries, and see daily/monthly debit and credit totals.
 - Extract supported masked account hints and recipient labels; conservatively link full-amount refunds/reversals when strong matching evidence exists.
@@ -54,9 +106,59 @@ Or manually:
 
 The app has no account, cloud sync, ads, analytics, payment initiation, bank API connection, or Internet permission. It supports new incoming SMS and optional history import without becoming the default SMS app.
 
+### Current interface and accounting
+
+- A warm light theme and clearer dark theme, quieter rows and fields, focused
+  editing sheets, and reachable Close/Save actions while scrolling or using the keyboard.
+- Home separates your spending from gross money out and money in. Breakdown
+  explains the numbers; self transfers, card-bill settlements and unconfirmed
+  payments remain excluded. These figures are recorded activity, not bank balances.
+- People separates all-date outstanding amounts, newly owed amounts in the selected
+  month, repayments received that month and amounts still unpaid from that month's
+  expenses. Repayments reduce what is owed, not your original personal share.
+- Reusable local groups with equal or custom default proportions. Preview or override
+  the shares for each payment; editing a default does not rewrite previous expenses.
+- Focused category/purpose correction from a row or notification. Financial details
+  remain available under More details; changing a label alone does not confirm an uncertain alert.
+- Reversible **Not a transaction**, clearer capture/permission recovery, optional backup
+  reminders, System/Light/Dark appearance and an updated skippable app tour.
+
+See the [changelog](CHANGELOG.md) and version-specific release notes for verification,
+known limitations and upgrade restrictions. Passing emulator checks is not proof
+of every physical phone's background SMS behavior.
+
+### Individual group splits
+
+For a repayable **Group** expense, choose **Split with people**. Add reusable local
+nicknames and choose Equal, Custom amounts or By parts. You are included: ₹900 split between You,
+Alice and Bob gives each a ₹300 share. Custom amounts must add up exactly; equal
+splits distribute leftover paise starting with You, then the displayed people.
+**By parts** supports unequal proportions: ₹900 at 1:2 becomes ₹300 and ₹600.
+Decimal and zero parts are allowed if at least one share is positive. Rounding
+uses largest remainders, breaking ties in the displayed order, so no paise is lost.
+Save a group default to reuse the proportions. Recorded payments retain their exact
+rupee shares; reopening a payment shows those amounts, not the original parts input.
+In a transaction form, Apply split updates the draft; save the payment to record it.
+
+**People → Outstanding / Settled** shows individual balances and expense drilldowns.
+Record a partial/full settlement against a person using cash or an existing incoming
+payment. An incoming payment is not counted twice; no one can repay more than their
+unpaid share. Unlink keeps the incoming record. Shares with settlements must be
+unlinked before changing the split. Existing unnamed balances are preserved, not
+guessed from payer text; unlink and explicitly relink old repayments to assign people.
+
+Nicknames, shares and receipts are included in password-encrypted backups; older
+supported backups remain readable. CSV schema 3 adds individual shares, repayments and unpaid
+amounts (unencrypted, including nicknames). No contacts access, invitations or sync.
+Alpha.21 and alpha.22 use schema 9: their backups require a schema-9-capable release
+and **cannot be restored by alpha.20 or older**. Do not downgrade an updated installation.
+Check GitHub Releases for the latest published APK; a release candidate is not a
+published download until its pre-release is available there.
+
 ### Import existing SMS
 
-**Settings → Import last 3 months** offers an optional, on-device SMS history scan.
+**Settings → More settings → SMS & notifications → Import last 3 months** offers an optional,
+on-device SMS history scan.
 Read the disclosure and grant inbox access, inspect the preview, then confirm import.
 Original SMS receipt dates are kept; repeat SMS fingerprints are skipped and uncertain
 records go to Review. Import sends no per-record notifications. You can cancel or undo
@@ -74,8 +176,8 @@ Requires **Android 8.0 (API 26) or newer**. Current runtime verification is on a
 1. Open [Releases](https://github.com/hk121902-stack/finance-ministry/releases) and choose the newest **pre-release**. Download its `txnsense-*-debug.apk`, not the source-code ZIP.
 2. Install the APK on a test device. Android may ask you to allow installations from the browser or Files app you used to download it. This is a one-time installer permission for that app; download only from this repository's Releases page. Do not disable Play Protect globally.
 3. Open TxnSense. **+ Add transaction** works immediately without SMS or notification permissions.
-4. Open **Settings → Enable SMS capture**, read the disclosure, and continue through Android's SMS permission prompt. **Pause SMS capture** means capture is currently enabled.
-5. In **Settings**, enable **Recording notifications** and allow the separate Android prompt. If blocked, use **Allow Android notifications** or **Open notification settings**. The in-app switch and Android permission are independent; both must be on for notifications.
+4. In the refreshed app, turn on **Settings → SMS capture**, read the disclosure, and continue through Android's SMS permission prompt. **Pause SMS capture** means capture is currently enabled.
+5. Turn on **Settings → Recording notifications** and allow the separate Android prompt. If blocked, use **Allow Android notifications** or **Open notification settings**. The in-app switch and Android permission are independent; both must be on for notifications.
 6. New eligible messages are recorded automatically. Open a row or its notification to review or correct it.
 
 Android treats APK installation, SMS access and notification access as separate choices.
@@ -83,25 +185,31 @@ SMS capture and notifications are optional: declining either one never blocks ma
 transactions. The app explains why it needs SMS access before Android shows its
 permission prompt.
 
-Manual example: enter `250.50`, keep **Money out**, and save. Cash, Other and Successful are the defaults; transaction type and payment status are under **More details**. The ledger shows **Confirmed by you**.
+Manual example: enter `250.50`, keep **Money out**, and save. Cash, Other and Successful are the defaults. Choose Category and who the payment was for; technical transaction type and payment status are under **More details → Advanced details**. Use the plain-language **Card bill payment**, **Refund**, or **Self transfer** controls when relevant. Ordinary unidentified types do not require a dropdown selection; unidentified card credits still need an explicit bill/refund/other choice before confirming. The ledger shows **Confirmed by you**.
 
 Emulator-only automatic example (this command does not send a real SMS):
 ```sh
 adb -s emulator-5554 emu sms send 5551234 "INR 314.15 debited from your account via UPI"
 ```
-With capture enabled, this produces a **Money out · Saved automatically** transaction. With notifications allowed, it also produces a notification. A message such as `Your account debited by 250` goes to **Review** because the currency amount is uncertain.
+With capture enabled, the current parser saves this as a **Needs review** candidate:
+the numeric emulator origin is not treated as a plausible bank service header.
+With notifications allowed, it also produces a notification. A message such as
+`Your account debited by 250` also needs review because the currency amount is uncertain.
+Origin-format checks do not authenticate a sender, including an alphanumeric header.
 
-Parser version 6 recognizes the supported ICICI account-debit/recipient-credit
-template and additional bank/card formats, including selected Kotak and BOBCARD layouts.
+The unreleased parser revision 10 recognizes bounded ICICI account-debit/recipient-credit
+and additional bank/card formats, including selected Kotak, BOBCARD and OneCard layouts.
 Coverage is not guaranteed. Updating does
 not change existing records; use the optional import for missed SMS still in your inbox.
+Explicit negations are rejected; ambiguous conversational or conditional movement
+references are held for review instead of silently becoming confirmed spending.
 See the [remaining parser work](docs/ROADMAP.md#confirmed-open-parser-issues).
 
 ### Updating
 
 Download the next APK from the same repository and install it over the existing app. Official alpha releases use one persistent signing identity and an increasing Android version code. Local developer builds use a different key and may not update an official APK in place.
 
-**Do not uninstall to troubleshoot an update without understanding the consequence:** uninstalling or using Erase all removes the local ledger. There is currently no export, backup, cloud restore, or data recovery. Release notes will call out known upgrade restrictions. Moving to a future production signing identity may require a separate migration plan.
+**Do not uninstall to troubleshoot an update without understanding the consequence:** uninstalling or using Erase all removes the local ledger. Create a password-encrypted backup in **Settings → Backup & restore** (alpha.20: **Backup & export**) first and verify that you retain both the file and password. There is no cloud account, automatic sync or password-recovery service. Release notes will call out known upgrade restrictions. Moving to a future production signing identity may require a separate migration plan.
 
 ### Debug-build limits
 
@@ -208,6 +316,7 @@ Parser coverage is limited to the layouts that have templates and is not guarant
 - Monthly summaries exclude failed, reversed, pending, transfer and needs-review records. They are transaction summaries, not a verified account balance.
 - History is paginated in 100-record pages; summaries are not verified bank balances.
 - OEM background restrictions, multipart edge cases, permission lifecycle behavior, and real-phone reliability need broader testing.
+- Home-screen widget availability and layout depend on the Android launcher.
 - No automatic updater; check Releases for updates.
 
 ## Build from source

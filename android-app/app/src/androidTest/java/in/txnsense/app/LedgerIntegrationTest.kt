@@ -97,6 +97,91 @@ class LedgerIntegrationTest {
         } finally { repository.eraseAll(); repository.close() }
     }
 
+    @Test fun transaction_result_totals_use_the_same_eligibility_rules_as_overview() = runBlocking {
+        val name = namespace()
+        val repository = TransactionRepository(context, name)
+        val now = System.currentTimeMillis()
+        try {
+            val db = FinanceDatabase.open(context, DeviceSecrets(context, name).databasePassphrase(false), "$name.db")
+            try {
+                fun row(id: String, amount: Long, direction: String = "Credit", status: String = "Successful",
+                    type: String = "Other", review: String = "Confirmed", ownership: String = "Personal",
+                    linkedOriginalId: String? = null) = TransactionEntity(
+                    id = id, sourceType = "Manual", sourceTimestamp = now, effectiveTimestamp = now,
+                    amountMinor = amount, direction = direction, status = status, channel = "Other",
+                    transactionType = type, reviewState = review, ownership = ownership,
+                    linkedOriginalId = linkedOriginalId, createdAt = now, updatedAt = now)
+
+                listOf(
+                    row("eligible-credit", 1000),
+                    row("eligible-debit", 700, direction = "Debit"),
+                    row("card-repayment", 2000, type = "CardRepayment"),
+                    row("self-transfer", 3000, type = "SelfTransfer", ownership = "SelfTransfer"),
+                    row("needs-review", 4000, review = "NeedsReview"),
+                    row("failed", 5000, status = "Failed"),
+                    row("reversed-original", 6000),
+                    row("reversal", 6000, status = "Reversed", type = "Reversal", linkedOriginalId = "reversed-original")
+                ).forEach { db.transactions().insert(it) }
+            } finally { db.close() }
+
+            val snapshot = repository.snapshot()
+            assertEquals("1000", snapshot.credit.toString())
+            assertEquals("1000", snapshot.resultCredit.toString())
+            assertEquals("700", snapshot.debit.toString())
+            assertEquals("700", snapshot.resultDebit.toString())
+            assertEquals("700", snapshot.resultPersonalSpend.toString())
+            assertEquals(8, snapshot.resultCount)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun filtered_personal_spending_uses_all_matching_rows_and_preserves_gifts_and_family() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        val now = System.currentTimeMillis()
+        try {
+            repository.withLedger { database ->
+                fun row(id: String, amount: Long, ownership: String = "Personal", share: Long? = null,
+                    repaymentExpected: Boolean = true, direction: String = "Debit", type: String = "Other",
+                    review: String = "Confirmed", status: String = "Successful", duplicate: String? = null,
+                    linked: String? = null) = TransactionEntity(id = id, sourceType = "Manual", sourceTimestamp = now,
+                    effectiveTimestamp = now, amountMinor = amount, direction = direction, status = status,
+                    channel = "Other", transactionType = type, reviewState = review, createdAt = now, updatedAt = now,
+                    counterpartyLabel = "Lunch $id", category = "Food", ownership = ownership,
+                    personalShareMinor = share, repaymentExpected = repaymentExpected,
+                    duplicateOfId = duplicate, linkedOriginalId = linked)
+                repeat(105) { database.transactions().insert(row("group-$it", 10000, "Group", 2500)) }
+                listOf(row("gift", 8000, "ForOther", 0, repaymentExpected = false),
+                    row("family", 4000, "Family"), row("loan", 6000, "ForOther", 0),
+                    row("income", 5000, direction = "Credit"), row("bill", 7000, type = "CardRepayment"),
+                    row("transfer", 9000, "SelfTransfer", type = "SelfTransfer"),
+                    row("pending", 3000, review = "NeedsReview"), row("excluded", 2000, review = "Dismissed"),
+                    row("failed", 1000, status = "Failed"), row("duplicate", 1500, duplicate = "family"),
+                    row("original", 3500), row("reversal", 3500, direction = "Credit", type = "Reversal",
+                        status = "Reversed", linked = "original"))
+                    .forEach { database.transactions().insert(it) }
+            }
+            val all = repository.snapshot()
+            assertEquals("1068000", all.resultDebit.toString())
+            assertEquals("5000", all.resultCredit.toString())
+            assertEquals("274500", all.resultPersonalSpend.toString())
+            assertEquals(all.personalSpend, all.resultPersonalSpend)
+            val groups = repository.snapshot(filter = "Group+Debit+Manual+Category:Food", search = "Lunch")
+            assertEquals(100, groups.rows.size)
+            assertTrue(groups.hasOlder)
+            assertEquals(105L, groups.resultCount)
+            assertEquals("1050000", groups.resultDebit.toString())
+            assertEquals("262500", groups.resultPersonalSpend.toString())
+            val older = repository.snapshot(offset = 100, filter = "Group+Debit+Manual+Category:Food", search = "Lunch")
+            assertEquals(5, older.rows.size)
+            assertEquals("262500", older.resultPersonalSpend.toString())
+            val others = repository.snapshot(filter = "ForOthers+Debit+Category:Food")
+            assertEquals("14000", others.resultDebit.toString())
+            assertEquals("8000", others.resultPersonalSpend.toString())
+            assertEquals("0", repository.snapshot(filter = "Review").resultPersonalSpend.toString())
+            assertEquals("0", repository.snapshot(search = "no matching payment").resultPersonalSpend.toString())
+            assertEquals("274500", repository.snapshot().personalSpend.toString())
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
     @Test fun manual_edit_audit_totals_delete_and_nullable_fingerprints() = runBlocking {
         val name = namespace(); val repository = TransactionRepository(context, name)
         try {
@@ -352,6 +437,74 @@ class LedgerIntegrationTest {
         } finally { repository.eraseAll(); repository.close() }
     }
 
+    @Test fun categories_combine_with_other_filters_before_pagination_without_changing_totals() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        try {
+            val flat = repository.save(input().copy(category = "Flat expenses", ownership = SpendingOwnership.Family))
+            val bills = repository.save(input().copy(category = "Bills", ownership = SpendingOwnership.Family))
+            repository.save(input().copy(category = "Bills", direction = Direction.Credit, ownership = SpendingOwnership.Family))
+            repository.save(input().copy(category = "Bills"))
+            repeat(101) { repository.save(input().copy(category = "Food", ownership = SpendingOwnership.Family)) }
+            val all = repository.snapshot()
+            val filtered = repository.snapshot(filter = "Family+Debit+Manual+Category:Flat expenses+Category:Bills")
+            assertEquals(setOf(flat, bills), filtered.rows.map { it.id }.toSet())
+            assertFalse(filtered.hasOlder)
+            assertEquals(all.debit, filtered.debit)
+            assertEquals(all.credit, filtered.credit)
+            assertEquals(all.personalSpend, filtered.personalSpend)
+            assertTrue(repository.snapshot(filter = "Category:Travel").rows.isEmpty())
+            val food = repository.snapshot(filter = "Category:Food")
+            assertEquals(100, food.rows.size)
+            assertTrue(food.hasOlder)
+            val older = repository.snapshot(offset = 100, filter = "Category:Food")
+            assertEquals(1, older.rows.size)
+            assertFalse(older.hasOlder)
+            assertFalse(older.rows.single().id in food.rows.map { it.id })
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun family_is_filterable_and_counts_as_spending_without_debt() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        try {
+            val family = SpendingOwnership.valueOf("Family")
+            val id = repository.save(input().copy(amount = "2000", category = "Health", ownership = family))
+            val other = repository.save(input().copy(amount = "100", ownership = SpendingOwnership.ForOther))
+            repository.classify(other, "Food", family)
+            repository.save(input().copy(amount = "50"))
+            val result = repository.snapshot(filter = "Family+Debit+Manual")
+            assertEquals(setOf(id, other), result.rows.map { it.id }.toSet())
+            assertEquals("215000", result.personalSpend.toString())
+            assertEquals("0", result.paidForOthers.toString())
+            assertEquals("0", result.outstandingRepayments.toString())
+            assertEquals(listOf(other), repository.snapshot(filter = "Family+Edited").rows.map { it.id })
+            assertTrue(repository.snapshot(filter = "Family+Credit").rows.isEmpty())
+            val saved = repository.get(id)!!
+            assertEquals("Health", saved.category)
+            assertEquals("Family", saved.ownership)
+            assertNull(repaymentSummary(saved))
+            repository.close()
+            assertEquals("Family", repository.get(id)!!.ownership)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun selected_month_outstanding_is_separate_from_all_date_balance() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        val zone = java.time.ZoneId.systemDefault()
+        val september = java.time.LocalDate.of(2026, 9, 1)
+        fun timestamp(date: java.time.LocalDate) = date.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+        try {
+            repository.save(input().copy(amount = "100.00", timestamp = timestamp(september.plusDays(14)),
+                ownership = SpendingOwnership.Group, groupLabel = "Trip", personalShare = "25.00", repaid = "10.00"))
+            repository.save(input().copy(amount = "50.00", timestamp = timestamp(september.minusMonths(1).plusDays(14)),
+                ownership = SpendingOwnership.ForOther, repaid = "20.00"))
+
+            val result = repository.snapshot(today = september)
+
+            assertEquals("9500", result.outstandingRepayments.toString())
+            assertEquals("6500", result.selectedMonthOutstandingRepayments.toString())
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
     @Test fun payment_sources_can_be_updated_and_retired_without_breaking_existing_transactions() = runBlocking {
         val repository = TransactionRepository(context, namespace())
         try {
@@ -379,6 +532,29 @@ class LedgerIntegrationTest {
                 repository.save(input().copy(channel = Channel.UPI, paymentSourceId = mismatched.id))
             }
             assertTrue(mismatchFailure.isFailure)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun payment_source_filters_support_multiple_sources_and_combine_with_categories() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        try {
+            val primary = repository.addPaymentSource("Primary UPI", "UPI", Channel.UPI, "HDFC", "7111")
+            val travel = repository.addPaymentSource("Travel UPI", "UPI", Channel.UPI, "ICICI", "0593")
+            val card = repository.addPaymentSource("Everyday card", "Credit card", Channel.Card, "Kotak", "5990")
+            val primaryId = repository.save(input().copy(amount = "10.00", channel = Channel.UPI,
+                category = "Food", paymentSourceId = primary.id))
+            val travelId = repository.save(input().copy(amount = "20.00", channel = Channel.UPI,
+                category = "Travel", paymentSourceId = travel.id))
+            repository.save(input().copy(amount = "30.00", channel = Channel.Card,
+                category = "Travel", paymentSourceId = card.id))
+
+            val selectedSources = repository.snapshot(filter = "Source:${primary.id}+Source:${travel.id}")
+            assertEquals(setOf(primaryId, travelId), selectedSources.rows.map { it.id }.toSet())
+            assertEquals("3000", selectedSources.resultDebit.toString())
+
+            val combined = repository.snapshot(filter = "Source:${primary.id}+Source:${travel.id}+Category:Travel")
+            assertEquals(listOf(travelId), combined.rows.map { it.id })
+            assertEquals("2000", combined.resultDebit.toString())
         } finally { repository.eraseAll(); repository.close() }
     }
 

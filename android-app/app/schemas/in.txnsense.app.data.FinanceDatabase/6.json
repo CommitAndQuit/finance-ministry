@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 6,
-    "identityHash": "ff68272f18349ab63762e190ddc0d4a4",
+    "identityHash": "18eaad1cfb14e818bf73df03cc56429c",
     "entities": [
       {
         "tableName": "transactions",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceFingerprint` BLOB, `sourceType` TEXT NOT NULL, `sourceTimestamp` INTEGER NOT NULL, `effectiveTimestamp` INTEGER NOT NULL, `amountMinor` INTEGER, `currency` TEXT, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `counterpartyLabel` TEXT, `maskedAccountHint` TEXT, `userNotes` TEXT, `confidence` INTEGER NOT NULL, `reviewState` TEXT NOT NULL, `parserVersion` INTEGER NOT NULL, `isUserCorrected` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `referenceHash` BLOB, `linkedOriginalId` TEXT, `importBatchId` TEXT, `category` TEXT NOT NULL, `ownership` TEXT NOT NULL, `groupLabel` TEXT, `personalShareMinor` INTEGER, `repaidMinor` INTEGER NOT NULL, `paymentSourceId` TEXT, `bankName` TEXT, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceFingerprint` BLOB, `sourceType` TEXT NOT NULL, `sourceTimestamp` INTEGER NOT NULL, `effectiveTimestamp` INTEGER NOT NULL, `amountMinor` INTEGER, `currency` TEXT, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `counterpartyLabel` TEXT, `maskedAccountHint` TEXT, `userNotes` TEXT, `confidence` INTEGER NOT NULL, `reviewState` TEXT NOT NULL, `parserVersion` INTEGER NOT NULL, `isUserCorrected` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `referenceHash` BLOB, `linkedOriginalId` TEXT, `importBatchId` TEXT, `category` TEXT NOT NULL, `ownership` TEXT NOT NULL, `groupLabel` TEXT, `personalShareMinor` INTEGER, `repaidMinor` INTEGER NOT NULL, `paymentSourceId` TEXT, `repaymentExpected` INTEGER NOT NULL DEFAULT 1, `duplicateOfId` TEXT, `categoryNeedsReview` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -171,9 +171,23 @@
             "affinity": "TEXT"
           },
           {
-            "fieldPath": "bankName",
-            "columnName": "bankName",
+            "fieldPath": "repaymentExpected",
+            "columnName": "repaymentExpected",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "duplicateOfId",
+            "columnName": "duplicateOfId",
             "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "categoryNeedsReview",
+            "columnName": "categoryNeedsReview",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -365,42 +379,52 @@
         }
       },
       {
-        "tableName": "skeleton_sightings",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`layoutKey` TEXT NOT NULL, `bankId` TEXT NOT NULL, `encoded` TEXT NOT NULL, `sightings` INTEGER NOT NULL, `firstSeen` INTEGER NOT NULL, `lastSeen` INTEGER NOT NULL, PRIMARY KEY(`layoutKey`))",
+        "tableName": "repayments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `expenseId` TEXT NOT NULL, `incomingId` TEXT, `amountMinor` INTEGER NOT NULL, `receivedAt` INTEGER, `payer` TEXT NOT NULL, `method` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`expenseId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`incomingId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
         "fields": [
           {
-            "fieldPath": "layoutKey",
-            "columnName": "layoutKey",
+            "fieldPath": "id",
+            "columnName": "id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "bankId",
-            "columnName": "bankId",
+            "fieldPath": "expenseId",
+            "columnName": "expenseId",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "encoded",
-            "columnName": "encoded",
-            "affinity": "TEXT",
-            "notNull": true
+            "fieldPath": "incomingId",
+            "columnName": "incomingId",
+            "affinity": "TEXT"
           },
           {
-            "fieldPath": "sightings",
-            "columnName": "sightings",
+            "fieldPath": "amountMinor",
+            "columnName": "amountMinor",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "firstSeen",
-            "columnName": "firstSeen",
-            "affinity": "INTEGER",
+            "fieldPath": "receivedAt",
+            "columnName": "receivedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "payer",
+            "columnName": "payer",
+            "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "lastSeen",
-            "columnName": "lastSeen",
+            "fieldPath": "method",
+            "columnName": "method",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
             "affinity": "INTEGER",
             "notNull": true
           }
@@ -408,110 +432,181 @@
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "layoutKey"
+            "id"
           ]
         },
         "indices": [
           {
-            "name": "index_skeleton_sightings_bankId",
+            "name": "index_repayments_expenseId",
             "unique": false,
             "columnNames": [
-              "bankId"
+              "expenseId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_skeleton_sightings_bankId` ON `${TABLE_NAME}` (`bankId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_repayments_expenseId` ON `${TABLE_NAME}` (`expenseId`)"
           },
           {
-            "name": "index_skeleton_sightings_lastSeen",
+            "name": "index_repayments_incomingId",
             "unique": false,
             "columnNames": [
-              "lastSeen"
+              "incomingId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_skeleton_sightings_lastSeen` ON `${TABLE_NAME}` (`lastSeen`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_repayments_incomingId` ON `${TABLE_NAME}` (`incomingId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "transactions",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "expenseId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "transactions",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "incomingId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
           }
         ]
       },
       {
-        "tableName": "learned_templates",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`templateId` TEXT NOT NULL, `bankId` TEXT NOT NULL, `regexPattern` TEXT NOT NULL, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `channel` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `sampleCount` INTEGER NOT NULL, `literalChars` INTEGER NOT NULL, `anchorCount` INTEGER NOT NULL, `state` TEXT NOT NULL, `agreements` INTEGER NOT NULL, `contradictions` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastMatchedAt` INTEGER, `promotedAt` INTEGER, `retiredAt` INTEGER, PRIMARY KEY(`templateId`))",
+        "tableName": "category_rules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `merchant` TEXT NOT NULL, `sourceId` TEXT, `category` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
-            "fieldPath": "templateId",
-            "columnName": "templateId",
+            "fieldPath": "id",
+            "columnName": "id",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "bankId",
-            "columnName": "bankId",
+            "fieldPath": "merchant",
+            "columnName": "merchant",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "regexPattern",
-            "columnName": "regexPattern",
+            "fieldPath": "sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "direction",
-            "columnName": "direction",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "status",
-            "columnName": "status",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "channel",
-            "columnName": "channel",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "transactionType",
-            "columnName": "transactionType",
-            "affinity": "TEXT",
-            "notNull": true
-          },
-          {
-            "fieldPath": "sampleCount",
-            "columnName": "sampleCount",
+            "fieldPath": "enabled",
+            "columnName": "enabled",
             "affinity": "INTEGER",
             "notNull": true
           },
           {
-            "fieldPath": "literalChars",
-            "columnName": "literalChars",
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
             "affinity": "INTEGER",
             "notNull": true
-          },
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "ledger_metadata",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, PRIMARY KEY(`key`))",
+        "fields": [
           {
-            "fieldPath": "anchorCount",
-            "columnName": "anchorCount",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "state",
-            "columnName": "state",
+            "fieldPath": "key",
+            "columnName": "key",
             "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "agreements",
-            "columnName": "agreements",
-            "affinity": "INTEGER",
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "key"
+          ]
+        }
+      },
+      {
+        "tableName": "match_decisions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `pairKey` TEXT NOT NULL, `action` TEXT NOT NULL, `firstId` TEXT NOT NULL, `secondId` TEXT NOT NULL, `beforeFirst` TEXT NOT NULL, `beforeSecond` TEXT NOT NULL, `afterFirst` TEXT NOT NULL, `afterSecond` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `undoneAt` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`firstId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`secondId`) REFERENCES `transactions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
             "notNull": true
           },
           {
-            "fieldPath": "contradictions",
-            "columnName": "contradictions",
-            "affinity": "INTEGER",
+            "fieldPath": "pairKey",
+            "columnName": "pairKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "action",
+            "columnName": "action",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstId",
+            "columnName": "firstId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "secondId",
+            "columnName": "secondId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "beforeFirst",
+            "columnName": "beforeFirst",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "beforeSecond",
+            "columnName": "beforeSecond",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "afterFirst",
+            "columnName": "afterFirst",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "afterSecond",
+            "columnName": "afterSecond",
+            "affinity": "TEXT",
             "notNull": true
           },
           {
@@ -521,52 +616,66 @@
             "notNull": true
           },
           {
-            "fieldPath": "lastMatchedAt",
-            "columnName": "lastMatchedAt",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "promotedAt",
-            "columnName": "promotedAt",
-            "affinity": "INTEGER"
-          },
-          {
-            "fieldPath": "retiredAt",
-            "columnName": "retiredAt",
+            "fieldPath": "undoneAt",
+            "columnName": "undoneAt",
             "affinity": "INTEGER"
           }
         ],
         "primaryKey": {
           "autoGenerate": false,
           "columnNames": [
-            "templateId"
+            "id"
           ]
         },
         "indices": [
           {
-            "name": "index_learned_templates_bankId",
+            "name": "index_match_decisions_firstId",
             "unique": false,
             "columnNames": [
-              "bankId"
+              "firstId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_learned_templates_bankId` ON `${TABLE_NAME}` (`bankId`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_match_decisions_firstId` ON `${TABLE_NAME}` (`firstId`)"
           },
           {
-            "name": "index_learned_templates_state",
+            "name": "index_match_decisions_secondId",
             "unique": false,
             "columnNames": [
-              "state"
+              "secondId"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_learned_templates_state` ON `${TABLE_NAME}` (`state`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_match_decisions_secondId` ON `${TABLE_NAME}` (`secondId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "transactions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "firstId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "transactions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "secondId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
           }
         ]
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ff68272f18349ab63762e190ddc0d4a4')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '18eaad1cfb14e818bf73df03cc56429c')"
     ]
   }
 }

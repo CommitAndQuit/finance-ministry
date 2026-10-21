@@ -1,0 +1,71 @@
+package `in`.txnsense.app
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import `in`.txnsense.app.core.model.*
+import `in`.txnsense.app.data.*
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+
+class CategoryAndBatchUiTest {
+    @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test fun batch_preview_applies_only_selection_and_can_be_undone() {
+        val r = (rule.activity.application as TxnSenseApp).container.repository
+        val ids = runBlocking { listOf("Batch first", "Batch second", "Batch untouched").map { label ->
+            r.save(ManualInput("25", Direction.Debit, System.currentTimeMillis(), TransactionType.Other, label = label)) } }
+        try {
+            rule.onNodeWithContentDescription("Open activity").performClick()
+            rule.onNodeWithText("Filters").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Search transactions").performScrollTo().performTextInput("Batch ")
+            rule.onNodeWithText("Show transactions").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Batch first").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithContentDescription("Filter transactions").performClick()
+            rule.openAdvancedFilters()
+            rule.onNodeWithText("Select transactions").performScrollTo().performClick()
+            rule.onNodeWithText("Select transactions").assertDoesNotExist()
+            rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Select Batch first").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Select Batch first"))
+            rule.onNodeWithContentDescription("Select Batch first").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Select Batch second").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Select Batch second"))
+            rule.onNodeWithContentDescription("Select Batch second").performClick()
+            rule.onNodeWithText("Category").performClick()
+            rule.onNodeWithText("Batch category: Other").performClick()
+            rule.onNodeWithText("Food").performClick()
+            rule.onNodeWithText("Preview changes").performClick()
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Apply update").fetchSemanticsNodes().isNotEmpty() }
+            assertEquals("Other", runBlocking { r.get(ids.first())!!.category })
+            rule.onNodeWithText("Apply update").performClick()
+            rule.waitUntil(15000) { runBlocking { r.get(ids.first())!!.category == "Food" } }
+            assertEquals("Food", runBlocking { r.get(ids[1])!!.category })
+            assertEquals("Other", runBlocking { r.get(ids[2])!!.category })
+            rule.onNodeWithText("Undo").performClick()
+            rule.waitUntil(15000) { runBlocking { r.get(ids.first())!!.category == "Other" } }
+            assertEquals("Other", runBlocking { r.get(ids[1])!!.category })
+        } finally { runBlocking { ids.forEach { r.delete(it) } } }
+    }
+
+    @Test fun category_rule_can_be_created_disabled_and_deleted_in_settings() {
+        val r = (rule.activity.application as TxnSenseApp).container.repository
+        try {
+            rule.onNodeWithContentDescription("Settings").performClick()
+            rule.openSettingsTool("Category rules")
+            rule.onNodeWithText("New rule").performClick()
+            rule.onNodeWithText("Exact merchant").performTextInput("Rule test merchant")
+            rule.onNodeWithText("Rule category: Other").performClick()
+            rule.onNodeWithText("Food").performClick()
+            rule.onNodeWithText("Save rule").performClick()
+            rule.waitUntil(15000) { runBlocking { r.categoryRules().any { it.merchant == "Rule test merchant" } } }
+            rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Enable rule Rule test merchant").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithContentDescription("Enable rule Rule test merchant").performScrollTo().performClick()
+            rule.waitUntil(15000) { runBlocking { r.categoryRules().single { it.merchant == "Rule test merchant" }.enabled.not() } }
+            rule.onNodeWithContentDescription("Delete rule Rule test merchant").performScrollTo().performClick()
+            rule.onNodeWithText("Delete rule").performClick()
+            rule.waitUntil(15000) { runBlocking { r.categoryRules().none { it.merchant == "Rule test merchant" } } }
+        } finally { runBlocking { r.categoryRules().filter { it.merchant == "Rule test merchant" }.forEach { r.deleteCategoryRule(it.id) } } }
+    }
+}
