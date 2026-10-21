@@ -14,6 +14,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: android-app
@@ -64,7 +66,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git tag -f ${{ steps.tagger.outputs.tag }}
-          git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git ${{ steps.tagger.outputs.tag }} --force
+          git push https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git ${{ steps.tagger.outputs.tag }} --force
 
       - name: Wait for tag to propagate
         run: sleep 5
@@ -76,4 +78,4 @@ jobs:
             --title "Debug Release ${{ steps.tagger.outputs.tag }}" \
             --notes "Automated debug build"
         env:
-          GH_TOKEN: ${{ secrets.PAT }}
+          GH_TOKEN: ${{ github.token }}
