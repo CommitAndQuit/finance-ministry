@@ -12,6 +12,10 @@
 !/.github/
 !/docs/
 !/tools/
+!/fdroid/
+!/fastlane/
+/fdroid/repo/
+/fdroid/archive/
 /docs/*
 !/docs/PRIVACY.md
 !/docs/RELEASING.md

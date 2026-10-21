@@ -1,0 +1,38 @@
+Categories:
+  - Money
+License: MIT
+SourceCode: https://github.com/CommitAndQuit/finance-ministry
+IssueTracker: https://github.com/CommitAndQuit/finance-ministry/issues
+Changelog: https://github.com/CommitAndQuit/finance-ministry/blob/main/CHANGELOG.md
+
+AuthorName: CommitAndQuit
+Summary: Offline expense tracker driven by incoming financial SMS alerts
+
+Description: |-
+  TxnSense is an offline, privacy-first Android expense tracker that records
+  transactions from incoming financial SMS and lets you organize, track, and
+  manage your spending locally.
+
+  Features:
+  * 100% Offline: Zero Internet permission (android.permission.INTERNET is not requested).
+  * Encrypted On-Device Storage: SQLCipher encrypted database with keys protected via Android Keystore.
+  * Fast Deterministic SMS Parsing: Recognizes ~90+ bank formats without external network calls.
+  * Spend & Income Tracking: Net spend per payment method, spend vs income totals, and monthly analytics.
+  * Review Queue: Flags uncertain amounts or unfamiliar message layouts for manual verification.
+
+RepoType: git
+Repo: https://github.com/CommitAndQuit/finance-ministry.git
+
+Builds:
+  - versionName: 0.1.0-alpha.10
+    versionCode: 10
+    commit: v0.1.0-alpha.10
+    subdir: android-app
+    gradle:
+      - assembleRelease
+    output: app/build/outputs/apk/release/app-release-unsigned.apk
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.0-alpha.10
+CurrentVersionCode: 10

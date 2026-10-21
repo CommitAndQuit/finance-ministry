@@ -1,0 +1,10 @@
+TxnSense is an offline, privacy-first Android expense tracker that records transactions from incoming financial SMS and lets you organize, track, and manage your spending locally.
+
+Key Features:
+* 100% Offline: Zero Internet permission (android.permission.INTERNET is not requested). No accounts, cloud sync, analytics, or trackers.
+* Encrypted On-Device Storage: SQLCipher encrypted database with keys protected via Android Keystore.
+* Fast Deterministic SMS Parsing: Recognizes ~90+ bank formats (UPI, cards, NetBanking, wallets, ATMs, bank transfers) without external network calls.
+* Spend & Income Tracking: Net spend per payment method, spend vs income totals, and monthly analytics.
+* Review Queue: Flags uncertain amounts or unfamiliar message layouts for manual verification.
+* Manual Transactions: Add, edit, or categorize transactions with customizable timestamps and notes.
+* SMS History Import: Optional on-device scan of inbox messages with safety previews and undo capabilities.

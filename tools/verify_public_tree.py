@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 ROOT_FILES = {".gitignore", ".gitattributes", "README.md", "LICENSE", "NOTICE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md"}
 PUBLIC_DOCS = {"PRIVACY.md", "RELEASING.md", "ROADMAP.md", "THIRD_PARTY_NOTICES.md"}
 TOOLS = {"verify_public_tree.py", "publish-alpha.ps1"}
-FDROID_FILES = {"config.yml"}
+FDROID_FILES = {"config.yml", "icon.png"}
 PATTERNS = [
     ("private key", re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----")),
     ("GitHub token", re.compile(rb"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b")),
@@ -30,7 +30,11 @@ def allowed(name):
         return len(path.parts) == 2 and path.name in PUBLIC_DOCS
     if name.startswith("tools/"):
         return len(path.parts) == 2 and path.name in TOOLS
+    if name.startswith("fastlane/"):
+        return path.suffix in {".txt", ".png", ".jpg", ".jpeg"}
     if name.startswith("fdroid/"):
+        if name.startswith("fdroid/metadata/"):
+            return path.suffix in {".yml", ".yaml", ".txt"}
         return len(path.parts) == 2 and path.name in FDROID_FILES
     if not name.startswith("android-app/"):
         return False

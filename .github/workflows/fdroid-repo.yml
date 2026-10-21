@@ -1,0 +1,136 @@
+name: Deploy F-Droid Repository
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-repo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install fdroidserver & tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fdroidserver apksigner
+
+      - name: Prepare F-Droid repository structure
+        run: |
+          mkdir -p fdroid/repo
+
+      - name: Fetch Release APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Attempting to download release APKs from GitHub releases..."
+          if gh release download --pattern "*.apk" --dir fdroid/repo 2>/dev/null; then
+            echo "Downloaded APKs:"
+            ls -la fdroid/repo/
+          else
+            echo "No published release APK found. Checking for workflow artifacts or build..."
+          fi
+
+      - name: Configure Repository Keystore
+        working-directory: fdroid
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.FDROID_STORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Restoring persistent repository keystore from FDROID_KEYSTORE_BASE64..."
+            echo "$KEYSTORE_BASE64" | base64 -d > keystore.p12
+          else
+            echo "::warning::FDROID_KEYSTORE_BASE64 secret not found. Running fdroid init for temporary keystore..."
+            fdroid init --no-prompt || true
+          fi
+
+      - name: Generate F-Droid Repository Index
+        working-directory: fdroid
+        env:
+          FDROID_KEY_STORE_PASS: ${{ secrets.FDROID_STORE_PASSWORD }}
+        run: |
+          # If APKs exist, index them; otherwise create empty repo index
+          if [ -n "$(ls -A repo/*.apk 2>/dev/null)" ]; then
+            fdroid update --create-metadata --pretty
+          else
+            echo "No APKs in repo directory yet. Creating minimal repository index..."
+            fdroid update --pretty || true
+          fi
+          ls -la repo/
+
+      - name: Stage Pages Artifact
+        run: |
+          mkdir -p pages/fdroid
+          # Copy fdroid/repo into pages/fdroid/repo so the URL matches https://commitandquit.github.io/finance-ministry/fdroid/repo
+          cp -r fdroid/repo pages/fdroid/
+          cp fdroid/icon.png pages/fdroid/ || true
+          
+          # Create user-friendly landing page
+          cat << 'EOF' > pages/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>TxnSense - F-Droid Repository</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 650px; margin: 40px auto; padding: 0 20px; color: #222; }
+              h1 { color: #176B60; }
+              .btn { display: inline-block; background: #176B60; color: #fff; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 15px 0; }
+              .btn:hover { background: #12554c; }
+              code { background: #f4f4f4; padding: 3px 6px; border-radius: 4px; font-size: 0.9em; word-break: break-all; }
+              .box { background: #f9f9f9; border-left: 4px solid #176B60; padding: 15px; margin: 20px 0; }
+            </style>
+          </head>
+          <body>
+            <h1>TxnSense F-Droid Repository</h1>
+            <p>This is the official self-hosted F-Droid repository for <strong>TxnSense</strong>, an offline, privacy-first Android expense tracker.</p>
+            
+            <a class="btn" href="fdroidrepo://commitandquit.github.io/finance-ministry/fdroid/repo">Add to F-Droid</a>
+
+            <div class="box">
+              <h3>Manual Setup</h3>
+              <ol>
+                <li>Open the <strong>F-Droid</strong> app on your Android device.</li>
+                <li>Go to <strong>Settings → Repositories</strong>.</li>
+                <li>Tap <strong>+</strong> and enter the repository address:
+                  <br><code>https://commitandquit.github.io/finance-ministry/fdroid/repo</code>
+                </li>
+                <li>Verify and accept the repository key fingerprint.</li>
+              </ol>
+            </div>
+
+            <p><a href="https://github.com/CommitAndQuit/finance-ministry">View TxnSense on GitHub</a></p>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+  deploy-pages:
+    needs: build-repo
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
