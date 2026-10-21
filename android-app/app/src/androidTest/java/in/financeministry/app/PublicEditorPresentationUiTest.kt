@@ -51,7 +51,10 @@ class PublicEditorPresentationUiTest {
             }
             rule.runOnUiThread { rule.activity.enableEdgeToEdge() }
             rule.setContent { LedgerApp(r, null, consumeRequest = {}) }
-            rule.waitUntil(15000) { rule.onAllNodesWithContentDescription("Categorize Weekly groceries").fetchSemanticsNodes().isNotEmpty() }
+            // Wait for the actual snapshot, then scroll as a user would. An
+            // optional Home setup card can put the first lazy row off screen.
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Your spending").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasContentDescription("Categorize Weekly groceries"))
             rule.onNodeWithContentDescription("Categorize Weekly groceries").performClick()
             rule.waitUntil(15000) { rule.onAllNodes(publicEditorSaveButton() and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             check(r, row)

@@ -6,7 +6,7 @@ An Android expense tracker that records transactions from incoming SMS and lets 
 
 **Status: early alpha.** The release channel is for installable **debug APKs** for testing. The app is being developed by one maintainer and is not ready for general use. Parsing can miss or misclassify transactions; check your records. Do not make this your only financial record.
 
-This source targets **v0.1.0-alpha.22**. Check
+This source targets **v0.1.0-alpha.24**. Check
 [GitHub Releases](https://github.com/hk121902-stack/finance-ministry/releases)
 for published downloads; a local build is not an official APK.
 Download the debug APK from its assets. The release includes its SHA-256 checksum,
@@ -14,16 +14,21 @@ signing-certificate details, and license notices. Physical-device testing is pen
 
 ## What works today
 
-This guide describes the current source. The Home/Activity/People/Review refresh
-and saved group defaults shipped in alpha.21; alpha.22 adds the improvements below.
-Items under **Unreleased** in the changelog, including the smaller category catalog,
-fractional-amount fix and online policy link, are not in the existing alpha.22 download.
+This guide describes the current source. Alpha.24 adds shared SMS layouts,
+safe historical-import repairs and optional Home permission setup, and includes
+the smaller category catalog, fractional-amount fix and online privacy link from
+the Play-only alpha.23 candidate. Check Releases for published builds and the
+changelog for version-specific changes.
 
 - Explore a skippable, twelve-chapter **App tour** on first launch and once after
   each update. Back/Next and optional More detail explain all current features;
   replay it from Settings. Finishing or skipping stops repeat prompts for that
   version. Optional setup never grants permissions or enables capture by itself.
 - Capture new financial SMS after you explicitly enable SMS access.
+- After the tour, use Home's optional **Enable SMS** and **Enable notifications**
+  actions to finish setup. Requests require a tap; blocked access opens Android
+  settings. **Not now** snoozes for seven days, while intentionally paused capture
+  or disabled in-app alerts are respected. History access remains a separate choice.
 - Save a normalized transaction first, then send an optional native notification with **View** and **Edit**.
 - Keep uncertain detections in **Review**, including transactions whose amount could not be safely extracted.
 - Add manual transactions with money-in/out choices, date/time pickers and optional details.
@@ -120,7 +125,7 @@ guessed from payer text; unlink and explicitly relink old repayments to assign p
 Nicknames, shares and receipts are included in password-encrypted backups; older
 supported backups remain readable. CSV schema 3 adds individual shares, repayments and unpaid
 amounts (unencrypted, including nicknames). No contacts access, invitations or sync.
-Alpha.21 and alpha.22 use schema 9: their backups require a schema-9-capable release
+Alpha.21 through alpha.24 use schema 9: their backups require a schema-9-capable release
 and **cannot be restored by alpha.20 or older**. Do not downgrade an updated installation.
 Check GitHub Releases for the latest published APK; a release candidate is not a
 published download until its pre-release is available there.
@@ -131,8 +136,12 @@ published download until its pre-release is available there.
 on-device SMS history scan.
 Read the disclosure and grant inbox access, inspect the preview, then confirm import.
 Original SMS receipt dates are kept; repeat SMS fingerprints are skipped and uncertain
-records go to Review. Import sends no per-record notifications. You can cancel or undo
-the latest import; undo preserves edited and pre-existing records. Permission denial
+records go to Review. After a parser update, rescanning also previews safe repairs
+for untouched imports with missing amounts, recipients or payment methods. Recovered
+amounts stay in Review and out of totals; field-only repairs preserve existing totals.
+Edits, dates and linked records are protected. Import sends no per-record notifications.
+You can cancel or undo the latest import; undo preserves edited, repaired, linked
+and pre-existing records. Permission denial
 does not block manual entry. Android/installer restrictions can prevent inbox access.
 Only SMS still in the inbox are available, not deleted messages, RCS or other apps.
 Each preview is limited to 20,000 SMS / 5,000 candidate transactions; exceeding either

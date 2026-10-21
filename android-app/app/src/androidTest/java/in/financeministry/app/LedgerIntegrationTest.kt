@@ -592,7 +592,7 @@ class LedgerIntegrationTest {
         try {
             repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
             val sms = IncomingSms("SYNTHETIC", System.currentTimeMillis(),
-                "Sent Rs.42.00\nFrom TEST Bank A/C *0000\nTo TEST PERSON\nOn 01/01/26")
+                "Sent Rs.42.00\nFrom TEST Bank A/C *0000\nTo TEST PERSON\nOn 01/01/26\nRef 000000000001")
             assertTrue(repository.ingest(sms))
             val row = repository.snapshot().rows.single()
             repository.close()
@@ -603,6 +603,25 @@ class LedgerIntegrationTest {
             repository.save(input().copy(amount = "43.00"), row.id)
             assertFalse(repository.ingest(sms))
             assertEquals(4300L, repository.get(row.id)!!.amountMinor)
+        } finally { repository.eraseAll(); repository.close() }
+    }
+
+    @Test fun incomplete_sent_alert_stays_reviewable_after_reopening_without_counting_money() = runBlocking {
+        val repository = TransactionRepository(context, namespace())
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.RECEIVE_SMS)
+        try {
+            repository.preferences.edit().putBoolean("sms_disclosure", true).commit()
+            val sms = IncomingSms("SYNTHETIC", System.currentTimeMillis(),
+                "Sent Rs.42.00\nFrom TEST Bank A/C *0000\nTo TEST PERSON\nOn 01/01/26")
+            assertTrue(repository.ingest(sms))
+            val id = repository.snapshot().rows.single().id
+            repository.close()
+            val stored = repository.get(id)!!
+            assertEquals("NeedsReview", stored.reviewState)
+            assertNull(stored.amountMinor)
+            assertEquals(0L, repository.snapshot().debit.toLong())
+            assertFalse(repository.ingest(sms))
+            assertEquals(1, repository.snapshot().rows.size)
         } finally { repository.eraseAll(); repository.close() }
     }
 

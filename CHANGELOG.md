@@ -30,7 +30,7 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
   when the amount agrees. Field-only repairs preserve counted totals and review
   state, and never replace known sources, categories or user corrections.
 
-## 0.1.0-alpha.23 — Play testing candidate (not published)
+## 0.1.0-alpha.23 — Play internal testing
 
 - Prepare a non-debuggable, minified Android App Bundle for Play testing with a
   new version code. Play App Signing retains the existing official-alpha signing

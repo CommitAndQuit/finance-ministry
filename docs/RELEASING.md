@@ -256,8 +256,10 @@ declarations are saved and ready to send for review; they have not been submitte
 or approved. Initial targeting is India, adults 18+. Play App Signing now uses the
 existing alpha signing identity, with a separate registered upload certificate.
 Portable/off-device keystore and password backups remain an owner responsibility.
-Version 0.1.0-alpha.23 / code 23 is the first hardened Play testing candidate, not a
-published release. Local release builds without upload credentials remain unsigned
+Version 0.1.0-alpha.23 / code 23 was the first hardened Play internal-testing release.
+Internal availability does not establish restricted-SMS or production approval;
+consult Play Console for the active track version. Local release builds without
+upload credentials remain unsigned
 validation candidates even if compilation and lint pass. Keep GitHub debug-alpha
 releases separate from Play submissions; never reuse a distributed version code.
 
