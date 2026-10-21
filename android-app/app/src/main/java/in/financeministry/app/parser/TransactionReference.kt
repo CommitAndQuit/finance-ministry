@@ -3,7 +3,7 @@ package `in`.financeministry.app.parser
 /** Transient only: callers must HMAC this value before persisting it. */
 object TransactionReference {
     private val label = Regex(
-        """(?<![\w@])(?:(?<reference>ref(?:erence)?|rrn|utr)\b(?:\s*no\.?)?\s*[:#.-]?|(?<upi>upi)\s*:)\s*""",
+        """(?<![\w@])(?:(?<reference>ref(?:erence)?|rrn|utr)(?:\s*no\.?)?\b\s*[:#.-]?|(?<upi>upi)\s*:)\s*""",
         RegexOption.IGNORE_CASE,
     )
     private val numericReference = Regex("""^(\d{8,24})(?=$|\s|[.;,)\]])(?!\.\d)""")

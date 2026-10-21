@@ -118,7 +118,7 @@ class PublicSettingsUiTest {
             rule.onNodeWithContentDescription("SMS capture").assertIsOff().performClick()
             rule.onNodeWithText("Read new SMS on this device?").assertIsDisplayed()
             assertFalse(r.preferences.getBoolean("sms_disclosure",false))
-            rule.onNodeWithText("Not now").performClick()
+            rule.onNode(hasText("Not now") and hasAnyAncestor(isDialog())).performClick()
             rule.onNodeWithContentDescription("SMS capture").assertIsOff()
             rule.onNodeWithContentDescription("Recording notifications").assertIsOn().performClick()
             rule.onNodeWithContentDescription("Recording notifications").assertIsOff()

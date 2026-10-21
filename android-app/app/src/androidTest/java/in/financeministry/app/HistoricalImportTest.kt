@@ -20,6 +20,177 @@ class HistoricalImportTest {
     private fun grant() = InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(context.packageName, Manifest.permission.READ_SMS)
     private fun source(vararg rows: HistoricalSms) = HistoricalSmsSource { _, emit -> rows.forEach { emit(it) } }
 
+    // Same grammatical shapes as tester feedback, with invented private details.
+    private val sharedLayouts = listOf(
+        "Rs.42.50 Dr. from A/C XXXXXX0000 and Cr. to sample.pay@hdfcbank. Ref:000000000001. AvlBal:Rs9876.54(2026:10:20 01:53:41). Not you? Call 1800000000-BOB",
+        "Sent Rs.42.50\nFrom HDFC Bank A/C *0000\nTo Sample Box\nOn 16/10/26\nRef 000000000002\nNot You?\nSMS BLOCK UPI to 7000000000",
+        "Sent Rs.42.50\nFrom HDFC Bank A/C *0000\nTo sample.pay-1@okexample\nOn 18/10/26\nRef 000000000003",
+        "Sent Rs.42.50 from Kotak Bank A/c X0000 to Sample Cafe on 21-10-26. UPI Ref 000000000004. Not done by you? Tap https://example.com/fraud",
+        "Sent Rs.42.50 from Other Bank A/c X0000 to Demo Play on 21-10-26. UPI Ref 000000000005.",
+        "Sent Rs.42.50 from Example Bank A/c X0000 to Sample Health Co on 21-10-26. UPI Ref 000000000006.",
+        "Spent INR 42.50 \nusing Axis Bank Credit Card no. XX0000 on 20-10-26 19:12:42 IST at \nSAMPLE SHOP. \nAvl limit: INR 9876.54."
+    )
+
+    @Test fun shared_payment_layouts_import_with_labels_dates_methods_and_repeat_deduplication() = runBlocking {
+        grant()
+        val r = repository()
+        val now = System.currentTimeMillis()
+        val messages = sharedLayouts.mapIndexed { i, body -> HistoricalSms("AD-EXBANK", now - 1000 - i, now - 2000 - i, body) }
+        try {
+            val preview = r.previewImport(source(*messages.toTypedArray()), now)
+            assertEquals(7, preview.ready)
+            assertEquals(0, preview.ignored)
+            assertEquals(listOf("sample.pay", "Sample Box", "sample.pay-1", "Sample Cafe", "Demo Play", "Sample Health Co", "SAMPLE SHOP"),
+                preview.rows.map { it.counterpartyLabel })
+            assertEquals(listOf("UPI", "Unknown", "UPI", "UPI", "UPI", "UPI", "Card"), preview.rows.map { it.channel })
+            assertTrue(preview.rows.all { it.amountMinor == 4250L && it.direction == "Debit" && it.status == "Successful" })
+            assertEquals(messages.map { it.date }, preview.rows.map { it.effectiveTimestamp })
+            assertTrue(r.snapshot().rows.isEmpty())
+            assertEquals(7, r.commitImport(preview).inserted)
+            assertEquals("29750", r.snapshot().debit.toString())
+            assertEquals(7, r.previewImport(source(*messages.toTypedArray()), now).duplicates)
+            assertEquals(0, r.commitImport(preview).inserted)
+        } finally { r.eraseAll(); r.close() }
+    }
+
+    @Test fun field_only_import_repairs_preserve_counted_totals_sources_categories_and_identity() = runBlocking {
+        grant()
+        val r = repository()
+        val now = System.currentTimeMillis()
+        val messages = listOf(0, 2, 6).map { i -> HistoricalSms("AD-EXBANK", now - 1000 - i, 0, sharedLayouts[i]) }
+        try {
+            val paymentSource = r.addPaymentSource("Demo UPI", "Bank account", Channel.UPI, "", "0000")
+            r.commitImport(r.previewImport(source(*messages.toTypedArray()), now))
+            val originals = r.snapshot().rows
+            r.withLedger { db -> originals.forEach { row ->
+                db.transactions().update(row.copy(counterpartyLabel = null, channel = "Unknown", transactionType = "Unknown",
+                    parserVersion = 12, category = "Food"))
+            } }
+            val oldTotal = r.snapshot().debit
+            val preview = r.previewImport(source(*messages.toTypedArray()), now)
+            assertEquals(3, preview.repairs)
+            assertEquals(0, preview.newCount)
+            assertTrue(r.snapshot().rows.all { it.counterpartyLabel == null })
+            assertEquals(3, r.commitImport(preview).repaired)
+            val updated = r.snapshot()
+            assertEquals(oldTotal, updated.debit)
+            assertEquals(3, updated.rows.size)
+            for (original in originals) {
+                val row = r.get(original.id)!!
+                assertEquals(original.effectiveTimestamp, row.effectiveTimestamp)
+                assertEquals(original.importBatchId, row.importBatchId)
+                assertEquals(original.paymentSourceId, row.paymentSourceId)
+                if (original.channel == "UPI") assertEquals(paymentSource.id, row.paymentSourceId)
+                assertEquals("Food", row.category)
+                assertEquals("AutoRecorded", row.reviewState)
+                assertEquals(original.counterpartyLabel, row.counterpartyLabel)
+                assertEquals(original.channel, row.channel)
+            }
+            assertEquals(0, r.commitImport(preview).repaired)
+            assertEquals(3, r.previewImport(source(*messages.toTypedArray()), now).duplicates)
+            assertEquals(0, r.undoImport(originals.first().importBatchId!!))
+        } finally { r.eraseAll(); r.close() }
+    }
+
+    private suspend fun legacyIncomplete(r: TransactionRepository, now: Long): Pair<HistoricalSms, TransactionEntity> {
+        val sms = HistoricalSms("AD-EXBANK", now - 1000, now - 2000,
+            "Dear UPI user A/C X0000 debited by 42.50 on date 18Sep26 trf to SAMPLE SHOP Refno 000000000001")
+        r.commitImport(r.previewImport(source(sms), now))
+        val original = r.snapshot().rows.single()
+        val incomplete = original.copy(amountMinor = null, currency = null, counterpartyLabel = null,
+            referenceHash = null, confidence = 60, parserVersion = 12, reviewState = "NeedsReview")
+        r.withLedger { it.transactions().update(incomplete) }
+        return sms to incomplete
+    }
+
+    @Test fun rescan_previews_and_repairs_missing_amount_once_without_creating_another_transaction() = runBlocking {
+        grant()
+        val r = repository()
+        val now = System.currentTimeMillis()
+        try {
+            val (sms, old) = legacyIncomplete(r, now)
+            val originalBatch = r.latestImport()!!.id
+            val preview = r.previewImport(source(sms, sms), now)
+            assertEquals(1, preview.rows.size)
+            assertEquals(1, preview.repairs)
+            assertEquals(0, preview.newCount)
+            assertEquals(1, preview.duplicates)
+            assertEquals(old.id, preview.rows.single().id)
+            assertEquals(4250L, preview.rows.single().amountMinor)
+            assertEquals("SAMPLE SHOP", preview.rows.single().counterpartyLabel)
+            assertEquals("NeedsReview", preview.rows.single().reviewState)
+            assertNull(r.get(old.id)!!.amountMinor) // Preview never writes.
+            val result = r.commitImport(preview)
+            assertEquals(0, result.inserted)
+            assertEquals(1, result.repaired)
+            assertEquals(1, r.snapshot().rows.size)
+            val repaired = r.get(old.id)!!
+            assertEquals(4250L, repaired.amountMinor)
+            assertEquals(old.effectiveTimestamp, repaired.effectiveTimestamp)
+            assertEquals(old.importBatchId, repaired.importBatchId)
+            assertNotNull(repaired.referenceHash)
+            assertEquals("NeedsReview", repaired.reviewState)
+            assertEquals("0", r.snapshot().debit.toString())
+            val repeated = r.commitImport(preview)
+            assertEquals(0, repeated.inserted)
+            assertEquals(0, repeated.repaired)
+            assertEquals(0, r.previewImport(source(sms), now).rows.size)
+            assertEquals(1, r.previewImport(source(sms), now).duplicates)
+            assertEquals(originalBatch, r.latestImport()!!.id)
+            assertEquals(0, r.undoImport(originalBatch)) // Do not erase a pre-existing repaired row.
+            assertEquals(4250L, r.get(old.id)!!.amountMinor)
+        } finally { r.eraseAll(); r.close() }
+    }
+
+    @Test fun repair_preview_cannot_overwrite_a_later_user_correction() = runBlocking {
+        grant()
+        val r = repository()
+        val now = System.currentTimeMillis()
+        try {
+            val (sms, old) = legacyIncomplete(r, now)
+            val preview = r.previewImport(source(sms), now)
+            assertEquals(1, preview.rows.size)
+            r.save(ManualInput("99", Direction.Debit, old.effectiveTimestamp, TransactionType.Other,
+                label = "My correction", notes = "Keep this"), old.id)
+            assertEquals(0, r.commitImport(preview).inserted)
+            val preserved = r.get(old.id)!!
+            assertEquals(9900L, preserved.amountMinor)
+            assertEquals("My correction", preserved.counterpartyLabel)
+            assertEquals("Keep this", preserved.userNotes)
+            assertTrue(preserved.isUserCorrected)
+            assertEquals(1, r.snapshot().rows.size)
+        } finally { r.eraseAll(); r.close() }
+    }
+
+    @Test fun rescan_preserves_confirmed_dismissed_audited_changed_and_complete_records() = runBlocking {
+        grant()
+        val r = repository()
+        val now = System.currentTimeMillis()
+        try {
+            val (sms, old) = legacyIncomplete(r, now)
+            val protected = listOf(old.copy(isUserCorrected = true), old.copy(reviewState = "Confirmed"),
+                old.copy(reviewState = "Dismissed"), old.copy(updatedAt = old.updatedAt + 1),
+                old.copy(amountMinor = 9900, currency = "INR"), old.copy(userNotes = "Keep this"),
+                old.copy(ownership = "Group", groupLabel = "Trip"), old.copy(linkedOriginalId = "original"),
+                old.copy(duplicateOfId = "duplicate"))
+            for (row in protected) {
+                r.withLedger { it.transactions().update(row) }
+                val preview = r.previewImport(source(sms), now)
+                assertTrue("Protected record offered for repair: $row", preview.rows.isEmpty())
+                assertEquals(1, preview.duplicates)
+                r.commitImport(preview)
+                assertEquals(row.amountMinor, r.get(old.id)!!.amountMinor)
+            }
+            r.withLedger {
+                it.transactions().update(old)
+                it.transactions().audit(listOf(CorrectionEntity(UUID.randomUUID().toString(), old.id,
+                    old.createdAt, "category", "Other", "Food")))
+            }
+            assertTrue(r.previewImport(source(sms), now).rows.isEmpty())
+            assertNull(r.get(old.id)!!.amountMinor)
+        } finally { r.eraseAll(); r.close() }
+    }
+
     @Test fun portable_restore_requires_review_before_reimport_can_change_totals() = runBlocking {
         grant()
         val first = repository()
@@ -80,6 +251,10 @@ class HistoricalImportTest {
         try {
             val preview = repository.previewImport()
             assertTrue("Expected synthetic inbox SMS", preview.rows.any { it.amountMinor == 876543L })
+            val payment = preview.rows.single { it.amountMinor == 876543L }
+            assertEquals("Sample Import Cafe", payment.counterpartyLabel)
+            assertEquals("UPI", payment.channel)
+            assertEquals("AutoRecorded", payment.reviewState)
             repository.commitImport(preview)
             assertEquals(1, repository.snapshot().rows.count { it.amountMinor == 876543L })
             assertEquals(0, repository.previewImport().rows.size)

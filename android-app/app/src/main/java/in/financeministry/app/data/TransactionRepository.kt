@@ -213,9 +213,9 @@ class TransactionRepository(private val context: Context, private val namespace:
                     val alternate = secrets.hmacSource(message.sender, message.date, message.body)
                     val keys = listOf(primary, alternate).map { android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
                     val dao = if (database != null || context.getDatabasePath(dbName).exists()) db().transactions() else null
-                    if (keys.any { it in seen } || dao?.hasFingerprint(primary) == true || dao?.hasFingerprint(alternate) == true) duplicates++
+                    if (keys.any { it in seen }) duplicates++
                     else {
-                        check(candidates.size < 5000) { "Too many transactions to preview safely. Nothing was imported." }
+                        val existing = listOfNotNull(dao?.byFingerprint(primary), dao?.byFingerprint(alternate)).distinctBy { it.id }
                         val review = parsed.decision == ParseDecision.NeedsReview || parsed.transactionType in listOf(TransactionType.Refund, TransactionType.Reversal) ||
                             dao?.metadata("foreign_restore") == "true"
                         val row = TransactionEntity(UUID.randomUUID().toString(), primary, SourceType.SMS.name, message.date, message.date,
@@ -228,7 +228,17 @@ class TransactionRepository(private val context: Context, private val namespace:
                             referenceHash = `in`.financeministry.app.parser.TransactionReference.extract(message.body)?.let {
                                 hashTransactionReference(message.sender, it)
                             })
-                        candidates += ImportCandidate(row, alternate, message.sender)
+                        if (existing.isEmpty()) {
+                            check(candidates.size < 5000) { "Too many transactions to preview safely. Nothing was imported." }
+                            candidates += ImportCandidate(row, alternate, message.sender)
+                        } else {
+                            val old = existing.singleOrNull()
+                            val repair = old?.let { importRepair(dao!!, it, row) }
+                            if (repair == null) duplicates++ else {
+                                check(candidates.size < 5000) { "Too many transactions to preview safely. Nothing was imported." }
+                                candidates += ImportCandidate(repair, alternate, message.sender, requireNotNull(old).updatedAt)
+                            }
+                        }
                     }
                     seen.addAll(keys)
                 }
@@ -239,6 +249,14 @@ class TransactionRepository(private val context: Context, private val namespace:
         ImportPreview(window, scanned, ignored, duplicates, epoch, candidates.toList())
     }
 
+    private fun importRepair(dao: TransactionDao, old: TransactionEntity, parsed: TransactionEntity): TransactionEntity? {
+        val repair = ImportRepairs.propose(old, parsed) ?: return null
+        if (dao.corrections(old.id).isNotEmpty() || dao.hasActiveFinancialMatch(old.id) ||
+            dao.repaymentsFor(old.id).isNotEmpty() || dao.allocationsFrom(old.id).isNotEmpty() ||
+            dao.sharesFor(old.id).isNotEmpty() || dao.linkedTo(old.id).isNotEmpty()) return null
+        return repair
+    }
+
     suspend fun commitImport(preview: ImportPreview): ImportResult {
         val operation = currentCoroutineContext()
         return locked {
@@ -246,12 +264,29 @@ class TransactionRepository(private val context: Context, private val namespace:
             check(preview.epoch == importEpoch) { "This preview expired. Scan again." }
             check(historyPermissionGranted()) { "SMS permission was removed. Scan again." }
             val batchId = UUID.randomUUID().toString()
-            var inserted = 0; var duplicates = preview.duplicates
+            var inserted = 0; var duplicates = preview.duplicates; var repaired = 0
             val dao = db().transactions()
             db().runInTransaction {
                 for (candidate in preview.candidates) {
                     operation.ensureActive()
-                    if (dao.hasFingerprint(candidate.row.sourceFingerprint!!) || dao.hasFingerprint(candidate.alternateFingerprint)) duplicates++
+                    if (candidate.previousUpdatedAt != null) {
+                        val current = dao.get(candidate.row.id)
+                        val repair = current?.takeIf {
+                            it.updatedAt == candidate.previousUpdatedAt &&
+                                it.sourceFingerprint?.contentEquals(candidate.row.sourceFingerprint) == true
+                        }?.let { importRepair(dao, it, candidate.row) }
+                        if (repair == null) duplicates++ else {
+                            val before = requireNotNull(current)
+                            val now = maxOf(System.currentTimeMillis(), Math.addExact(before.updatedAt, 1))
+                            dao.update(repair.copy(updatedAt = now))
+                            // Preserve repaired pre-existing records when an old import is undone.
+                            // Store normalized evidence only, never the inbox body or sender.
+                            dao.audit(listOf(CorrectionEntity(UUID.randomUUID().toString(), before.id, now,
+                                "parserRecovery", "v${before.parserVersion}:${if (before.amountMinor == null) "missingAmount" else "incompleteFields"}",
+                                "v${repair.parserVersion}:${repair.amountMinor}:INR")))
+                            repaired++
+                        }
+                    } else if (dao.hasFingerprint(candidate.row.sourceFingerprint!!) || dao.hasFingerprint(candidate.alternateFingerprint)) duplicates++
                     else {
                         val mapped = mappedSourceId(candidate.row.channel, candidate.row.maskedAccountHint, candidate.transientSender, dao)
                         val imported = candidate.row.copy(importBatchId = batchId, paymentSourceId = mapped,
@@ -263,7 +298,7 @@ class TransactionRepository(private val context: Context, private val namespace:
                 if (inserted > 0) dao.insertBatch(ImportBatchEntity(batchId, System.currentTimeMillis(), preview.window.start, preview.window.end, inserted))
             }
             revision.value++
-            ImportResult(batchId, inserted, duplicates)
+            ImportResult(batchId, inserted, duplicates, repaired)
         }
     }
 

@@ -62,6 +62,7 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
     HorizontalDivider()
     Text("Past transactions", style = MaterialTheme.typography.titleMedium)
     Text("Optionally scan SMS still on this phone from the last three calendar months. Nothing is uploaded; original SMS are never changed.")
+    Text("Rescan after parser updates to fill missing amounts, recipients or payment methods in untouched imports. Preview first; recovered amounts need Review, while field-only repairs preserve existing totals.", style = MaterialTheme.typography.bodySmall)
     if (restoredHistory) Text("A backup from another installation was restored. Its old SMS matching keys cannot move between installations, so new historical imports need review. Check for duplicates before confirming them.", style = MaterialTheme.typography.bodySmall)
     OutlinedButton(onClick = { disclosure = true }, enabled = !busy) { Text("Import last 3 months") }
     if (busy) {
@@ -77,6 +78,7 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
                 Text("${date(ready.window.start)} – ${date(ready.window.end)}")
                 Text("${ready.scanned} scanned · ${ready.ignored} ignored")
                 Text("${ready.ready} ready · ${ready.needsReview} need review · ${ready.duplicates} duplicates skipped")
+                if (ready.repairs > 0) Text("${ready.newCount} new transactions · ${ready.repairs} existing records to repair. Original dates are kept. Field-only repairs preserve totals; recovered amounts stay out of totals until reviewed.")
                 Text("Unconfirmed records stay out of totals. Existing corrections are preserved. No per-transaction notifications will be sent.")
                 ready.rows.take(5).forEach { row -> Text("${date(row.effectiveTimestamp)} · ${money(row.amountMinor)} · ${transactionFlowLabel(row)}") }
                 if (ready.rows.size > 5) Text("Showing the first 5 of ${ready.rows.size} transactions.")
@@ -87,13 +89,13 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
                             try {
                                 val result = repository.commitImport(ready)
                                 preview = null
-                                message = "Imported ${result.inserted} transactions. Skipped ${result.duplicates} duplicates. Review uncertain records from Home."
+                                message = "Imported ${result.inserted} transactions. Repaired ${result.repaired} existing records. Skipped ${result.duplicates} duplicates. Check Review for recovered amounts and uncertain records."
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) { preview = null; message = "Import could not finish. Start a new scan; existing records were preserved." }
                             finally { busy = false }
                         }
                     }
-                }, enabled = !busy && ready.rows.isNotEmpty()) { Text("Import ${ready.rows.size} transactions") }
+                }, enabled = !busy && ready.rows.isNotEmpty()) { Text(if (ready.repairs == 0) "Import ${ready.rows.size} transactions" else "Import ${ready.newCount} and repair ${ready.repairs}") }
                 TextButton(onClick = { preview = null }, enabled = !busy) { Text("Discard preview") }
             }
         }
@@ -110,12 +112,12 @@ private fun ImportPanelContent(repository: TransactionRepository, source: Histor
             dismissButton = { TextButton(onClick = { disclosure = false }) { Text("Not now") } })
     }
     if (undo) AlertDialog(onDismissRequest = { undo = false }, title = { Text("Undo last import?") },
-        text = { Text("Remove only untouched transactions from that import. Records you edited and all pre-existing records are kept. Your phone's SMS are not deleted.") },
+        text = { Text("Remove only untouched transactions from that import. Edited, repaired, repayment-linked and pre-existing records are kept. Your phone's SMS are not deleted.") },
         confirmButton = { TextButton(onClick = {
             val batch = lastBatch ?: return@TextButton
             undo = false; busy = true
             job = scope.launch {
-                try { message = "Removed ${repository.undoImport(batch.id)} imported records. Edited records were preserved."; preview = null }
+                try { message = "Removed ${repository.undoImport(batch.id)} imported records. Edited, repaired and linked records were preserved."; preview = null }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { message = "Undo could not finish. Please try again." }
                 finally { busy = false }

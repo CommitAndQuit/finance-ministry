@@ -4,6 +4,32 @@ User-visible changes are recorded here. Pre-1.0 releases are experimental.
 
 ## Unreleased
 
+## 0.1.0-alpha.24
+
+- Add a clickable Home setup card for missing SMS and recording-notification
+  permissions after the tour. Explain SMS access before asking; use permission
+  prompts or Android settings as appropriate, refresh after grants/returning,
+  and respect intentionally paused capture or disabled alerts. Not now snoozes
+  the card for seven days; a new app version can offer setup again. Manual entry
+  remains available without permissions.
+
+- Recognize complete currency-less UPI debit alerts, including `debited by ...
+  on date ... trf to ... Refno ...`, across issuers using that grammar. Extract
+  the recipient and compact reference while retaining amount, OTP, future-payment,
+  origin, multi-event and balance safeguards.
+- Recognize named-recipient and VPA `Sent ... From ... To ... On ... Ref`
+  payments across single-line and multiline alerts, Dr./Cr. UPI recipients,
+  and `Spent ... using ... Credit Card no. ...` alerts with optional timestamps
+  and line breaks. Exclude `Not done by you?` security instructions from payment
+  evidence. Shared grammatical rules are issuer-independent (parser revision 14).
+- Preview safe repairs for untouched, previously imported SMS records whose
+  amounts were missing. Rescanning the original inbox can fill new parser evidence
+  without adding duplicates or overwriting edits, dates, sources or linked records.
+  Confirm repairs explicitly; recovered amounts remain in Review and out of totals.
+- Enrich untouched imported debits with missing recipients or payment methods
+  when the amount agrees. Field-only repairs preserve counted totals and review
+  state, and never replace known sources, categories or user corrections.
+
 ## 0.1.0-alpha.23 — Play testing candidate (not published)
 
 - Prepare a non-debuggable, minified Android App Bundle for Play testing with a

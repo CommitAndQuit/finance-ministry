@@ -170,6 +170,7 @@ interface TransactionDao {
     fun filteredTotals(purpose: String, origin: String, direction: String, reviewOnly: Boolean, start: Long, end: Long, allCategories: Boolean, categories: List<String>, allSources: Boolean, sourceIds: List<String>, search: String, paymentKind: String = "All"): TransactionResultTotals
     @Query("SELECT * FROM transactions WHERE id = :id") fun get(id: String): TransactionEntity?
     @Query("SELECT EXISTS(SELECT 1 FROM transactions WHERE sourceFingerprint = :fingerprint)") fun hasFingerprint(fingerprint: ByteArray): Boolean
+    @Query("SELECT * FROM transactions WHERE sourceFingerprint = :fingerprint") fun byFingerprint(fingerprint: ByteArray): TransactionEntity?
     @Insert fun insertBatch(batch: ImportBatchEntity)
     @Query("SELECT * FROM import_batches ORDER BY createdAt DESC LIMIT 1") fun latestImport(): ImportBatchEntity?
     @Query("SELECT * FROM transactions AS item WHERE importBatchId = :batchId AND isUserCorrected = 0 AND NOT EXISTS (SELECT 1 FROM corrections WHERE transactionId = item.id)")

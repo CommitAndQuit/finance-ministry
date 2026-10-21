@@ -40,7 +40,8 @@ class AndroidHistoricalSmsSource(private val context: Context) : HistoricalSmsSo
     }
 }
 
-internal data class ImportCandidate(val row: TransactionEntity, val alternateFingerprint: ByteArray, val transientSender: String)
+internal data class ImportCandidate(val row: TransactionEntity, val alternateFingerprint: ByteArray,
+    val transientSender: String, val previousUpdatedAt: Long? = null)
 
 /** Normalized preview only; process death/navigation drops it without ledger writes. */
 class ImportPreview internal constructor(
@@ -54,6 +55,8 @@ class ImportPreview internal constructor(
     val rows: List<TransactionEntity> get() = candidates.map { it.row }
     val ready: Int get() = candidates.count { it.row.reviewState != "NeedsReview" }
     val needsReview: Int get() = candidates.size - ready
+    val repairs: Int get() = candidates.count { it.previousUpdatedAt != null }
+    val newCount: Int get() = candidates.size - repairs
 }
 
-data class ImportResult(val batchId: String, val inserted: Int, val duplicates: Int)
+data class ImportResult(val batchId: String, val inserted: Int, val duplicates: Int, val repaired: Int = 0)

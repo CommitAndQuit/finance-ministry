@@ -2,6 +2,9 @@ package `in`.financeministry.app
 
 import android.Manifest
 import android.app.Application
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.key
@@ -34,7 +37,9 @@ class HomeSafetyUiTest {
                 TransactionType.Other, label = "Entry $it")) } }
             configure(repo)
             rule.setContent { key(generation.intValue) { LedgerApp(repo, null, consumeRequest = {}) } }
-            rule.waitUntil(15000) { rule.onAllNodesWithText("Recent activity").fetchSemanticsNodes().isNotEmpty() }
+            // The section heading is rendered before the asynchronous snapshot.
+            // Wait for actual summary data, which also drives the backup cue.
+            rule.waitUntil(15000) { rule.onAllNodesWithText("Your spending").fetchSemanticsNodes().isNotEmpty() }
             check(repo)
         } finally { runBlocking { repo.eraseAll(); repo.close() } }
     }
@@ -56,10 +61,13 @@ class HomeSafetyUiTest {
         assertTrue("A manual correction must not pretend SMS capture has recovered", repo.preferences.getBoolean("capture_error", false))
     }
 
-    @Test fun capture_status_warning_reaches_sms_settings_without_losing_the_ledger() = withHome(entries = 1, configure = {
-        it.preferences.edit().putBoolean("sms_permission_requested", true).putBoolean("sms_disclosure", false).commit()
+    @Test fun intentionally_paused_capture_does_not_nag_but_settings_remain_available() = withHome(entries = 1, configure = {
+        it.preferences.edit().putBoolean("sms_permission_requested", true).putBoolean("sms_disclosure", false)
+            .putBoolean("notifications", false).commit()
     }) { repo ->
-        rule.onNode(hasText("Manage settings", substring = true) and hasClickAction()).performScrollTo().performClick()
+        rule.onNodeWithText("Enable SMS").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Settings").performClick()
+        rule.openSettingsTool("SMS & notifications")
         rule.onNodeWithText("SMS & notifications").assertIsDisplayed()
         rule.onNodeWithText("You can always add or correct a transaction yourself.", substring = true).assertExists()
         assertEquals(100L, runBlocking { repo.snapshot().debit.toLong() })
@@ -106,14 +114,25 @@ class HomeSafetyUiTest {
     @Test fun denied_sms_permission_is_identified_on_home_and_routes_to_permission_recovery() {
         assumeTrue("Requires host-prepared denied SMS permission", InstrumentationRegistry.getArguments().getString("runHomeDeniedPermission") == "true")
         assertEquals(PackageManager.PERMISSION_DENIED, rule.activity.checkSelfPermission(Manifest.permission.RECEIVE_SMS))
-        withHome(entries = 1, configure = {
-            it.preferences.edit().putBoolean("sms_permission_requested", true).putBoolean("sms_disclosure", true).commit()
-        }) { repo ->
-            rule.onNodeWithText("SMS permission blocked. Manage settings").performScrollTo().assertIsDisplayed().performClick()
-            rule.onNodeWithText("SMS & notifications").assertIsDisplayed()
-            rule.onNodeWithText("SMS permission not allowed · Manual entry still works").assertExists()
-            assertFalse(repo.captureAllowed())
-            assertEquals(100L, runBlocking { repo.snapshot().debit.toLong() })
+        var launched: Intent? = null
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS) return null
+                launched = intent
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
         }
+        instrumentation.addMonitor(monitor)
+        try {
+            withHome(entries = 1, configure = {
+                it.preferences.edit().putBoolean("sms_permission_requested", true).putBoolean("sms_disclosure", true).commit()
+            }) { repo ->
+                rule.onNodeWithText("Enable SMS").performScrollTo().assertIsDisplayed().performClick()
+                rule.runOnIdle { assertEquals("package:${rule.activity.packageName}", requireNotNull(launched).data.toString()) }
+                assertFalse(repo.captureAllowed())
+                assertEquals(100L, runBlocking { repo.snapshot().debit.toLong() })
+            }
+        } finally { instrumentation.removeMonitor(monitor) }
     }
 }

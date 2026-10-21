@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.edit
 import `in`.financeministry.app.data.*
 import `in`.financeministry.app.core.model.transactionCategories
 import `in`.financeministry.app.feature.TransactionForm
@@ -106,6 +107,7 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
     var optionalToolsInitialTab by rememberSaveable { mutableStateOf("Budgets") }
     var notifications by remember { mutableStateOf(repository.preferences.getBoolean("notifications", true)) }
     var captureEnabled by remember { mutableStateOf(repository.captureAllowed()) }
+    var permissionResultGeneration by remember { mutableIntStateOf(0) }
     fun permissionNeedsSettings(): Boolean {
         var owner: android.content.Context = context
         while (owner is android.content.ContextWrapper && owner !is android.app.Activity) owner = owner.baseContext
@@ -190,18 +192,55 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
     val smsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         captureEnabled = repository.captureAllowed()
         smsSettingsRequired = permissionNeedsSettings()
+        permissionResultGeneration++
     }
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notificationAvailable = `in`.financeministry.app.sms.TransactionNotifications.available(context)
+        permissionResultGeneration++
+    }
+    fun enableCapture() {
+        if (repository.captureAllowed()) return
+        if (permissionNeedsSettings() && repository.preferences.getBoolean("sms_disclosure", false)) openSmsSettings()
+        else disclosure = true
     }
     fun changeCapture() {
         if (captureEnabled) { repository.preferences.edit().putBoolean("sms_disclosure", false).apply(); captureEnabled = false }
-        else if (smsSettingsRequired && repository.preferences.getBoolean("sms_disclosure", false)) openSmsSettings()
-        else disclosure = true
+        else enableCapture()
+    }
+    fun openNotificationSettings() {
+        try {
+            val manager = context.getSystemService(android.app.NotificationManager::class.java)
+            val channelBlocked = manager.areNotificationsEnabled() &&
+                manager.getNotificationChannel(`in`.financeministry.app.sms.TransactionNotifications.CHANNEL)?.importance == android.app.NotificationManager.IMPORTANCE_NONE
+            context.startActivity(android.content.Intent(if (channelBlocked) android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS
+                else android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                .apply { if (channelBlocked) putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, `in`.financeministry.app.sms.TransactionNotifications.CHANNEL) })
+        } catch (_: Exception) { error = "Open Android Settings → Apps → Finance Ministry → Notifications to allow recording alerts." }
+    }
+    fun enableNotifications() {
+        notifications = true; repository.preferences.edit { putBoolean("notifications", true) }
+        var owner: android.content.Context = context
+        while (owner is android.content.ContextWrapper && owner !is android.app.Activity) owner = owner.baseContext
+        val activity = owner as? android.app.Activity
+        when (notificationSetupAction(
+            `in`.financeministry.app.sms.TransactionNotifications.available(context), Build.VERSION.SDK_INT >= 33,
+            Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+            repository.preferences.getBoolean("notification_permission_requested", false),
+            Build.VERSION.SDK_INT >= 33 && activity != null && androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.POST_NOTIFICATIONS))) {
+            NotificationSetupAction.None -> notificationAvailable = true
+            NotificationSetupAction.OpenSettings -> openNotificationSettings()
+            NotificationSetupAction.RequestPermission -> {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    repository.preferences.edit { putBoolean("notification_permission_requested", true) }
+                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else openNotificationSettings()
+            }
+        }
     }
     fun changeNotifications(enabled: Boolean) {
-        notifications = enabled; repository.preferences.edit().putBoolean("notifications", enabled).apply()
-        if (enabled && Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (enabled) enableNotifications()
+        else { notifications = false; repository.preferences.edit { putBoolean("notifications", false) } }
     }
     LaunchedEffect(refreshGeneration) {
         captureEnabled = repository.captureAllowed()
@@ -382,17 +421,16 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
                         isUpdate = tourIsUpdate,
                         onChapterChanged = { scope.launch { ledgerListState.scrollToItem(0) } })
                 }
+                if (listDestination == "Overview" && !listGuide) item {
+                    `in`.financeministry.app.feature.PermissionSetupNudge(repository, refreshGeneration, permissionResultGeneration,
+                        onEnableSms = ::enableCapture, onEnableNotifications = ::enableNotifications)
+                }
                 if (listDestination == "Overview") item {
                     listSnapshot?.let { data ->
                         LedgerHomeSummary(data,owedCountLabel,onMonth={showMonthPicker=true},onBreakdown={showSummaryDetails=true},
                             onPeople={destination="People";offset=0;snapshot=null})
                     }
                     if(repository.preferences.getBoolean("capture_error",false)) LedgerReviewCue("A message could not be recorded. Add it manually if needed.",{selected=null;selectedId=null;form=true},"info")
-                    else if(!captureEnabled && repository.preferences.getBoolean("sms_permission_requested",false)) {
-                        val smsAllowed = context.checkSelfPermission(Manifest.permission.RECEIVE_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                        LedgerReviewCue(if (smsAllowed) "SMS capture is paused. Manage settings" else "SMS permission blocked. Manage settings",
-                            {settings=true;settingsSection="SMS & messages"},"info")
-                    }
                     if(reviewAvailable) LedgerReviewCue("$reviewCount payment${if(reviewCount==1)"" else "s"} needs a quick check",{destination="Review";offset=0;snapshot=null})
                     val now=System.currentTimeMillis()
                     val lastBackup=repository.preferences.getLong("last_backup_at",0)
@@ -623,8 +661,7 @@ private fun LedgerContent(repository: TransactionRepository, request: Pair<Strin
                         }
                         if (notifications && !notificationAvailable) {
                             Text("Android notifications are blocked. SMS capture can still record transactions.", style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)) }) { Text("Open notification settings") }
+                            TextButton(onClick = ::openNotificationSettings) { Text("Open notification settings") }
                         }
                         `in`.financeministry.app.feature.HistoricalImportPanel(repository)
                     }
