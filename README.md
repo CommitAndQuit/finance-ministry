@@ -32,15 +32,16 @@ The current priority is enabling distribution via F-Droid so users can install a
 #### Action Items to Complete F-Droid Integration:
 
 ##### 1. Self-Hosted F-Droid Repository (GitHub Pages)
-- [ ] **Generate Persistent Keystore**: Create a dedicated PKCS12 keystore (`repo_key`) for signing repository indexes (`index-v1.jar`, `index-v2.json`) and configure `FDROID_KEYSTORE_BASE64` and `FDROID_STORE_PASSWORD` in repository Actions secrets.
-- [ ] **Configure Repository Settings**: Update [`fdroid/config.yml`](fdroid/config.yml) with repository metadata, URL (`https://commitandquit.github.io/finance-ministry/fdroid/repo`), and 512x512 branded `icon.png`.
-- [ ] **Automate GitHub Actions Workflow**: Add a workflow (`.github/workflows/fdroid-repo.yml`) that downloads release APKs, runs `fdroid update --create-metadata`, and deploys the repository to GitHub Pages via `actions/deploy-pages`.
-- [ ] **Enable GitHub Pages**: Set repository Pages source to GitHub Actions in GitHub settings.
+- [x] **Configure Repository Settings**: Configured [`fdroid/config.yml`](fdroid/config.yml) with repository metadata, URL (`https://commitandquit.github.io/finance-ministry/fdroid/repo`), and 512x512 branded [`fdroid/icon.png`](fdroid/icon.png).
+- [x] **Automate GitHub Actions Workflow**: Added [`.github/workflows/fdroid-repo.yml`](.github/workflows/fdroid-repo.yml) to index releases and deploy to GitHub Pages with landing page and `fdroidrepo://` badge.
+- [ ] **Generate Persistent Keystore**: Add `FDROID_KEYSTORE_BASE64` and `FDROID_STORE_PASSWORD` in repository Actions secrets (workflow currently uses auto `fdroid init` fallback).
+- [ ] **Enable GitHub Pages**: Set repository Pages source to **GitHub Actions** in GitHub settings.
 - [ ] **Test Client Subscription**: Verify adding `fdroidrepo://` and installing/updating the app using the official F-Droid client.
 
 ##### 2. Official F-Droid Catalog Submission (`fdroiddata`)
-- [ ] **Fastlane Metadata**: Add `fastlane/metadata/android/en-US` containing app summaries, description, icon, and screenshots.
-- [ ] **Prepare Build Recipe**: Draft `metadata/in.txnsense.app.yml` specifying the source build configuration and reproducible Gradle build commands.
+- [x] **Fastlane Metadata**: Added `fastlane/metadata/android/en-US` containing app summaries, description, and icon.
+- [x] **Prepare Build Recipe**: Added [`fdroid/metadata/in.txnsense.app.yml`](fdroid/metadata/in.txnsense.app.yml) ready for upstream submission to `gitlab.com/fdroid/fdroiddata`.
+- [ ] **Screenshots**: Capture and add 3-5 app screenshots to `fastlane/metadata/android/en-US/images/phoneScreenshots/`.
 - [ ] **Local Build Verification**: Validate the build recipe using `fdroid build` inside an isolated container.
 - [ ] **Submit Upstream MR**: Open and track a Merge Request on `gitlab.com/fdroid/fdroiddata`.
 
